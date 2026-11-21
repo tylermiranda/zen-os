@@ -155,7 +155,7 @@ local function getBookInfo(reader_ui)
     }
 end
 
-function M.pushProgress(reader_ui, interactive)
+function M.pushProgress(reader_ui, interactive, force)
     local info = getBookInfo(reader_ui)
     if not info or not info.md5 then return end
 
@@ -180,10 +180,12 @@ function M.pushProgress(reader_ui, interactive)
                 device = "Kobo Libra H2O (ZenOS)",
                 device_id = "kobo-zenos",
                 timestamp = os.time(),
+                force = force == true or nil,
             })
 
+            local push_url = SERVER_URL .. (force == true and "/syncs/progress?force=true" or "/syncs/progress")
             local res, code = http.request({
-                url = SERVER_URL .. "/syncs/progress",
+                url = push_url,
                 method = "PUT",
                 headers = {
                     ["Content-Type"] = "application/json",
@@ -194,7 +196,11 @@ function M.pushProgress(reader_ui, interactive)
             })
 
             if interactive then
-                showInfo(string.format("Reading progress in sync ✓ (Page %d / %.1f%%)", info.cur_page, info.cur_percent * 100), 2)
+                if force == true then
+                    showInfo(string.format("Saved Page %d (%.1f%%) as furthest ✓", info.cur_page, info.cur_percent * 100), 2)
+                else
+                    showInfo(string.format("Reading progress in sync ✓ (Page %d / %.1f%%)", info.cur_page, info.cur_percent * 100), 2)
+                end
             end
         end)
     end
@@ -277,26 +283,50 @@ function M.syncProgress(reader_ui, interactive)
                         remote_page, remote_percent * 100, remote.device or "phone reader"))
                 end
 
-                local ConfirmBox = require("ui/widget/confirmbox")
-                UIManager:show(ConfirmBox:new{
-                    text = string.format("You are on page %d (%.1f%%).\nFurthest read location on %s is page %d (%.1f%%).\n\nJump to furthest location?",
-                        cur_page, cur_percent * 100, remote.device or "phone reader", remote_page, remote_percent * 100),
-                    ok_text = "Jump to Page " .. remote_page,
-                    cancel_text = "Stay on Page " .. cur_page,
-                    ok_callback = function()
-                        if reader_ui.link and reader_ui.link.addCurrentLocationToStack then
-                            reader_ui.link:addCurrentLocationToStack()
-                        end
-                        local Event = require("ui/event")
-                        reader_ui:handleEvent(Event:new("GotoPage", remote_page))
-                        if interactive then
-                            showInfo(string.format("Jumped to Page %d (%.1f%%)", remote_page, remote_percent * 100), 2)
-                        end
-                    end,
-                    cancel_callback = function()
-                        -- Stay on current page, don't overwrite remote furthest
-                    end,
-                })
+                local ButtonDialog = require("ui/widget/buttondialog")
+                local dlg
+                dlg = ButtonDialog:new{
+                    title = string.format(
+                        "You are on page %d (%.1f%%).\nFurthest synced on %s is page %d (%.1f%%).",
+                        cur_page, cur_percent * 100, remote.device or "phone reader", remote_page, remote_percent * 100
+                    ),
+                    buttons = {
+                        {
+                            {
+                                text = string.format("Jump to Page %d (%.1f%%)", remote_page, remote_percent * 100),
+                                callback = function()
+                                    UIManager:close(dlg)
+                                    if reader_ui.link and reader_ui.link.addCurrentLocationToStack then
+                                        reader_ui.link:addCurrentLocationToStack()
+                                    end
+                                    local Event = require("ui/event")
+                                    reader_ui:handleEvent(Event:new("GotoPage", remote_page))
+                                    if interactive then
+                                        showInfo(string.format("Jumped to Page %d (%.1f%%)", remote_page, remote_percent * 100), 2)
+                                    end
+                                end,
+                            },
+                        },
+                        {
+                            {
+                                text = string.format("Use Page %d as Furthest (Overwrite)", cur_page),
+                                callback = function()
+                                    UIManager:close(dlg)
+                                    M.pushProgress(reader_ui, true, true)
+                                end,
+                            },
+                        },
+                        {
+                            {
+                                text = string.format("Stay on Page %d for Now", cur_page),
+                                callback = function()
+                                    UIManager:close(dlg)
+                                end,
+                            },
+                        },
+                    },
+                }
+                UIManager:show(dlg)
             elseif remote_percent and (cur_percent > (remote_percent + 0.005)) then
                 -- 3. If local position is ahead of server, push local progress to server
                 M.pushProgress(reader_ui, interactive)
