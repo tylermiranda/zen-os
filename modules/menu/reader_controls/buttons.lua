@@ -16,6 +16,7 @@ local ICONS = {
     page_browser = "coverflow",
     koreader_menu = "koreader",
     book_switcher = "history",
+    sync = "quick_sync",
 }
 
 local function supports(entry, group)
@@ -41,6 +42,7 @@ function M.defaults()
         { "page_browser", _("Page Browser"), false },
         { "koreader_menu", _("KOReader reader menu"), false },
         { "book_switcher", _("Book switcher") },
+        { "sync", _("Sync"), true },
     }
     local buttons = {}
     for _i, entry in ipairs(entries) do
@@ -138,6 +140,16 @@ function M.ensure(config)
             end
         end
         cfg.book_switcher_added = true
+    end
+    if not cfg.sync_button_added then
+        local present = false
+        for _i, entry in ipairs(cfg.entries) do
+            if entry.type == "reader_control" and entry.control == "sync" then present = true end
+        end
+        if not present then
+            table.insert(cfg.entries, 2, { id = "reader_sync", type = "reader_control", control = "sync", label = _("Sync"), enabled = true })
+        end
+        cfg.sync_button_added = true
     end
     if not cfg.book_info_actions then
         -- Search, Bookmarks and TOC live in the Book info card, which opens first; their buttons default off.

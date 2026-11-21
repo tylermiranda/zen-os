@@ -93,9 +93,10 @@ local function apply_quick_settings()
     -- ============================================================
 
     local config_default = {
-        button_order = { "wifi", "night", "rotate", "restart", "sleep" },
+        button_order = { "wifi", "sync", "night", "rotate", "restart", "sleep" },
         show_buttons = {
             wifi = true,
+            sync = true,
             bluetooth = false,
             night = true,
             frontlight = false,
@@ -264,6 +265,29 @@ local function apply_quick_settings()
             if key:sub(1, 3) == "cb_" and not cb_ids[key] then
                 config.show_buttons[key] = nil
             end
+        end
+        -- Ensure 'sync' button is enabled and in button_order (inserted right after wifi)
+        if config.show_buttons.sync == nil then
+            config.show_buttons.sync = true
+        end
+        local has_sync = false
+        for _i, id in ipairs(config.button_order) do
+            if id == "sync" or id == "kosync" then
+                has_sync = true
+                config.show_buttons[id] = true
+                break
+            end
+        end
+        if not has_sync then
+            local insert_idx = 2
+            for i, id in ipairs(config.button_order) do
+                if id == "wifi" then
+                    insert_idx = i + 1
+                    break
+                end
+            end
+            table.insert(config.button_order, insert_idx, "sync")
+            config.show_buttons.sync = true
         end
         zen_plugin.config.quick_settings = config
         if legacy_layout and type(zen_plugin.saveConfig) == "function" then
@@ -1100,14 +1124,45 @@ local function apply_quick_settings()
                 require("modules/settings/battery_stats_menu").open(zen_plugin)
             end,
         },
+        sync = {
+            icon = "quick_sync",
+            label = _("Sync"),
+            callback = function(touch_menu)
+                if touch_menu and touch_menu.closeMenu then touch_menu:closeMenu() end
+                local ok_r, ReaderUI = pcall(require, "apps/reader/readerui")
+                local reader = ok_r and ReaderUI.instance
+                if reader then
+                    local ok, epub_sync = pcall(require, "common/epub_sync")
+                    if ok and epub_sync and epub_sync.syncProgress then
+                        epub_sync.syncProgress(reader, true)
+                    end
+                else
+                    local InfoMessage = require("ui/widget/infomessage")
+                    UIManager:show(InfoMessage:new{
+                        text = _("Open a book to sync reading progress."),
+                        timeout = 2,
+                    })
+                end
+            end,
+        },
         kosync = {
             icon = "quick_sync",
             label = _("Sync"),
-            visible_func = function() return hasPlugin("kosync") end,
             callback = function(touch_menu)
-                touch_menu:closeMenu()
-                if zen_plugin.onZenUIKOSyncSync then
-                    zen_plugin:onZenUIKOSyncSync()
+                if touch_menu and touch_menu.closeMenu then touch_menu:closeMenu() end
+                local ok_r, ReaderUI = pcall(require, "apps/reader/readerui")
+                local reader = ok_r and ReaderUI.instance
+                if reader then
+                    local ok, epub_sync = pcall(require, "common/epub_sync")
+                    if ok and epub_sync and epub_sync.syncProgress then
+                        epub_sync.syncProgress(reader, true)
+                    end
+                else
+                    local InfoMessage = require("ui/widget/infomessage")
+                    UIManager:show(InfoMessage:new{
+                        text = _("Open a book to sync reading progress."),
+                        timeout = 2,
+                    })
                 end
             end,
         },

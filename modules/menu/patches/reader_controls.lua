@@ -83,6 +83,11 @@ return function(plugin)
                 ui.config:onShowConfigMenu(true)
             elseif id == "bookmarks" then
                 require("modules/reader/annotation_viewer").show(plugin, ui, "bookmarks")
+            elseif id == "sync" then
+                local ok, epub_sync = pcall(require, "common/epub_sync")
+                if ok and epub_sync and epub_sync.syncProgress then
+                    epub_sync.syncProgress(ui, true)
+                end
             end
         end)
     end
@@ -463,7 +468,7 @@ return function(plugin)
         end
         local entries = tm._reader_controls_embedded and {} or Buttons.visible(plugin.config, Settings.group(ui))
         local direct = { toc = true, bookmarks = true, search = true, vocabulary = true,
-            page_browser = true, koreader_menu = true }
+            page_browser = true, koreader_menu = true, sync = true }
         local sections, first_section = {}
         for _i, entry in ipairs(entries) do
             if entry.type == "reader_control" and not direct[entry.control] then

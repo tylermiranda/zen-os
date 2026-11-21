@@ -47,6 +47,29 @@ local function apply_status_on_open()
             book_status.invalidate(file)
         end
         UIManager:nextTick(finishOpen, self, doc_settings, file, was_tbr, status_changed)
+
+        -- Auto-sync EPUB file and reading progress with Bookworm sync server
+        pcall(function()
+            local doc_file = file or (self.document and self.document.file)
+            local md5 = doc_settings and type(doc_settings.readSetting) == "function"
+                and doc_settings:readSetting("partial_md5_checksum")
+            if not md5 and doc_file then
+                local util = require("util")
+                md5 = util.partialMD5(doc_file)
+            end
+            if doc_file and md5 then
+                local ok_sync, epub_sync = pcall(require, "common/epub_sync")
+                if ok_sync and epub_sync then
+                    if epub_sync.checkAndUploadEpub then
+                        epub_sync.checkAndUploadEpub(doc_file, md5)
+                    end
+                    if epub_sync.syncProgress then
+                        epub_sync.syncProgress(self, false)
+                    end
+                end
+            end
+        end)
+
         local meta = plugin and plugin.config and plugin.config._meta
         if type(meta) == "table" and meta.reader_defaults_apply_on_next_open == true then
             local ok_defaults, applied = pcall(function()
