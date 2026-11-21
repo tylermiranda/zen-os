@@ -2958,24 +2958,42 @@ local function install_home_key_handlers(menu)
         return handled
     end
 
-    local orig_next_page = menu.onNextPage
+    local prev_next_page = menu.onNextPage
     function menu:onNextPage(...)
+        if self._zen_bento_home then
+            local BentoBoard = require("modules/filebrowser/patches/home/bento_board")
+            local count = BentoBoard.PAGE_COUNT or 3
+            self._zen_bento_page = ((tonumber(self._zen_bento_page) or 1) % count) + 1
+            if self._home_rebuild then
+                self:_home_rebuild(false, false, require("common/ui/refresh")())
+            end
+            return true
+        end
         local handler = self._zen_home_strip_page_handler
         if type(handler) == "function" then
             handler("next")
             return true
         end
-        return orig_next_page and orig_next_page(self, ...)
+        return prev_next_page and prev_next_page(self, ...)
     end
 
-    local orig_prev_page = menu.onPrevPage
+    local prev_prev_page = menu.onPrevPage
     function menu:onPrevPage(...)
+        if self._zen_bento_home then
+            local BentoBoard = require("modules/filebrowser/patches/home/bento_board")
+            local count = BentoBoard.PAGE_COUNT or 3
+            self._zen_bento_page = ((tonumber(self._zen_bento_page) or 1) - 2) % count + 1
+            if self._home_rebuild then
+                self:_home_rebuild(false, false, require("common/ui/refresh")())
+            end
+            return true
+        end
         local handler = self._zen_home_strip_page_handler
         if type(handler) == "function" then
             handler("previous")
             return true
         end
-        return orig_prev_page and orig_prev_page(self, ...)
+        return prev_prev_page and prev_prev_page(self, ...)
     end
 
     menu.key_events = menu.key_events or {}
@@ -3117,6 +3135,11 @@ local function install_home_key_handlers(menu)
     end
 end
 
+local function is_bento_home_enabled(cfg)
+    local features = type(cfg) == "table" and cfg.features or nil
+    return not (type(features) == "table" and features.bento_home == false)
+end
+
 local function build_home_content(menu, zen_config, dcfg, rows, data_provider)
     local Device = require("device")
     local Screen = Device.screen
@@ -3256,6 +3279,37 @@ local function build_home_content(menu, zen_config, dcfg, rows, data_provider)
             end,
         })
         return true
+    end
+
+    if is_bento_home_enabled(zen_config) then
+        menu._zen_bento_home = true
+        menu._zen_home_clock_refreshers = {}
+        menu._zen_home_rebuild_rows = nil
+        local BentoBoard = require("modules/filebrowser/patches/home/bento_board")
+        return BentoBoard.build{
+            menu = menu,
+            zen_config = zen_config,
+            config = dcfg,
+            data = data_provider,
+            plugin = _zen_plugin,
+            openBook = open_book,
+            showBookMenu = show_book_context_menu,
+            registerClockRefresh = function(refresh, widget, keys)
+                if type(refresh) == "function" then
+                    table.insert(menu._zen_home_clock_refreshers, {
+                        refresh = refresh,
+                        widget = widget,
+                        keys = keys,
+                        component_id = "bento_header",
+                    })
+                end
+            end,
+            rebuildHome = function(refresh_stats, refresh_type)
+                if menu._home_rebuild then
+                    menu:_home_rebuild(refresh_stats == true, false, refresh_type)
+                end
+            end,
+        }
     end
 
     local function open_widget_settings(id)
@@ -3678,6 +3732,9 @@ end
 
 local function home_shell_is_compatible(menu, dcfg)
     if not (menu and type(dcfg) == "table") then return false end
+    local bento_home = is_bento_home_enabled(load_zen_config())
+    if (menu._zen_bento_home == true) ~= bento_home then return false end
+    if bento_home then return true end
     local show_status_bar = dcfg.show_status_bar ~= false
     if menu._zen_home_show_status_bar ~= show_status_bar then return false end
     if not show_status_bar then
@@ -3725,7 +3782,8 @@ function M.showHomeView(injectNavbar, initial_refresh_type)
     local cfg = load_zen_config()
     if type(cfg) ~= "table" then return end
     local dcfg = ensure_home_cfg()
-    local show_status_bar = dcfg.show_status_bar ~= false
+    local bento_home = is_bento_home_enabled(cfg)
+    local show_status_bar = not bento_home and (dcfg.show_status_bar ~= false)
     local Screen = require("device").screen
 
     local menu = StandalonePage.create_menu{
@@ -3735,6 +3793,10 @@ function M.showHomeView(injectNavbar, initial_refresh_type)
         block_filemanager_horizontal_swipe = true,
     }
     StandalonePage.prepare_shell(menu)
+    menu._zen_bento_home = bento_home
+    if bento_home then
+        menu._zen_bento_page = tonumber(menu._zen_bento_page) or 1
+    end
     menu._zen_home_strip_runtime = copy_home_strip_state(dcfg.strip_memory)
 
     local createStatusRow = _zen_shared and _zen_shared.createStatusRow
@@ -3759,8 +3821,8 @@ function M.showHomeView(injectNavbar, initial_refresh_type)
             _home_strip_page_state = data_provider:getStripPageState()
         end
     end
-    local has_clock_refreshers = rows_have_clock_refreshers(rows, dcfg)
-    local has_date_dependent = rows_have_date_dependent(rows)
+    local has_clock_refreshers = bento_home or rows_have_clock_refreshers(rows, dcfg)
+    local has_date_dependent = bento_home or rows_have_date_dependent(rows)
     menu._zen_home_has_clock_refreshers = has_clock_refreshers
 
     local function rebuild(refresh_stats, refresh_type)
@@ -3976,8 +4038,8 @@ function M.showHomeView(injectNavbar, initial_refresh_type)
         end
         rows = resolve_rows(dcfg)
         self._zen_home_has_strip = rows_have_component(rows, "strip")
-        has_clock_refreshers = rows_have_clock_refreshers(rows, dcfg)
-        has_date_dependent = rows_have_date_dependent(rows)
+        has_clock_refreshers = self._zen_bento_home == true or rows_have_clock_refreshers(rows, dcfg)
+        has_date_dependent = self._zen_bento_home == true or rows_have_date_dependent(rows)
         self._zen_home_has_clock_refreshers = has_clock_refreshers
         rebuild(refresh_stats == true, refresh_type)
         return true
@@ -4135,8 +4197,75 @@ function M.showHomeView(injectNavbar, initial_refresh_type)
 
     _home_menu = menu
 
-    if injectNavbar then
+    if injectNavbar and not bento_home then
         injectNavbar(menu, "home")
+    elseif bento_home then
+        local screen_w, screen_h = Screen:getWidth(), Screen:getHeight()
+        menu.width = screen_w
+        menu.height = screen_h
+        if menu.dimen then
+            menu.dimen.w = screen_w
+            menu.dimen.h = screen_h
+        end
+        if menu.inner_dimen then
+            menu.inner_dimen.w = screen_w
+            menu.inner_dimen.h = screen_h
+        end
+        local prev_on_swipe = menu.onSwipe
+        function menu:onSwipe(arg, ges)
+            if self._zen_bento_home and ges and (ges.direction == "east" or ges.direction == "west") then
+                local BentoBoard = require("modules/filebrowser/patches/home/bento_board")
+                local count = BentoBoard.PAGE_COUNT or 3
+                local delta = ges.direction == "west" and 1 or -1
+                local cur = tonumber(self._zen_bento_page) or 1
+                self._zen_bento_page = (cur - 1 + delta) % count + 1
+                rebuild(false, require("common/ui/refresh")())
+                return true
+            end
+            if prev_on_swipe then
+                return prev_on_swipe(self, arg, ges)
+            end
+        end
+        menu.onBack = function(m)
+            local open_tab = rawget(_G, "__ZEN_UI_NAVBAR_OPEN_TAB")
+            if type(open_tab) == "function" then
+                open_tab("books")
+                return true
+            end
+            if m.close_callback then m.close_callback()
+            else UIManager:close(m) end
+            return true
+        end
+        function menu:onSetRotationMode(rotation)
+            if rotation ~= nil and rotation ~= Screen:getRotationMode() then
+                local fm = require("apps/filemanager/filemanager").instance
+                if fm and type(fm.onSetRotationMode) == "function" then
+                    fm:onSetRotationMode(rotation)
+                else
+                    Screen:setRotationMode(rotation)
+                    UIManager:onRotation()
+                end
+                local sw, sh = Screen:getWidth(), Screen:getHeight()
+                self.width, self.height = sw, sh
+                if self.dimen then self.dimen.w, self.dimen.h = sw, sh end
+                if self.inner_dimen then self.inner_dimen.w, self.inner_dimen.h = sw, sh end
+                self._zen_home_screen_width = sw
+                self._zen_home_screen_height = sh
+                M.rebuildActive()
+                return true
+            end
+            return false
+        end
+        function menu:onScreenResize()
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            self.width, self.height = sw, sh
+            if self.dimen then self.dimen.w, self.dimen.h = sw, sh end
+            if self.inner_dimen then self.inner_dimen.w, self.inner_dimen.h = sw, sh end
+            self._zen_home_screen_width = sw
+            self._zen_home_screen_height = sh
+            M.rebuildActive()
+            return true
+        end
     end
     install_home_key_handlers(menu)
 
@@ -4152,7 +4281,7 @@ function M.showHomeView(injectNavbar, initial_refresh_type)
 end
 
 function M.getActivePage()
-    return _home_menu and (_home_menu.page or 1)
+    return _home_menu and (_home_menu._zen_bento_home and (_home_menu._zen_bento_page or 1) or _home_menu.page or 1)
 end
 
 function M.getActiveWidgets()

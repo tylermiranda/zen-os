@@ -2663,6 +2663,22 @@ function M.build(ctx)
 
     local home_items = {
             {
+                icon_glyph = icons.settings_layout,
+                text = _("Bento dashboard layout"),
+                help_text = _("Full-screen Aleph Bento-Box grid on the Home screen"),
+                checked_func = function()
+                    return not (type(config.features) == "table" and config.features.bento_home == false)
+                end,
+                callback = function()
+                    if type(config.features) ~= "table" then config.features = {} end
+                    config.features.bento_home = config.features.bento_home == false
+                    if ctx.plugin and type(ctx.plugin.saveConfig) == "function" then
+                        ctx.plugin:saveConfig()
+                    end
+                    save_home("reinit")
+                end,
+            },
+            {
                 icon_glyph = icons.widgets,
                 text = _("Widgets") .. " \u{25B8}",
                 keep_menu_open = true,

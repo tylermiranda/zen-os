@@ -135,6 +135,7 @@ local defaults = {
         clean_reader_top_menu = true,
         loop_pages            = true,
         full_refresh_on_page_turn = true,
+        bento_home            = true,
         custom_icons_enabled = false,
         lockdown_mode        = false,
         incognito_mode       = false,
