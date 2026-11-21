@@ -276,8 +276,9 @@ local function apply()
                 width = avail_w,
                 row_box,
             }
+            local rf_sz = row_frame:getSize()
             local hit = InputContainer:new{
-                dimen = row_frame:getSize():copy(),
+                dimen = Geom:new{ w = rf_sz.w, h = rf_sz.h },
                 row_frame,
             }
             hit.ges_events = {

@@ -4,6 +4,7 @@ local library_font_default = FontLanguage.supportsBundledFonts()
     and LibraryFontPath.BUNDLED_DEFAULT or "default"
 
 local defaults = {
+    bento_user_name = "Tyler",
     accent_enabled = true,
     accent_color = "#000000",
     accent_opacity = 100,
@@ -136,6 +137,7 @@ local defaults = {
         loop_pages            = true,
         full_refresh_on_page_turn = true,
         bento_home            = true,
+        bento_lockscreen      = true,
         custom_icons_enabled = false,
         lockdown_mode        = false,
         incognito_mode       = false,

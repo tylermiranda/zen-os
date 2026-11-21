@@ -2679,6 +2679,81 @@ function M.build(ctx)
                 end,
             },
             {
+                icon_glyph = icons.settings_sleep or icons.settings_layout,
+                text = _("Use Home screen as lock screen"),
+                help_text = _("Show the Bento Home dashboard as the sleep/lock screen"),
+                checked_func = function()
+                    return not (type(config.features) == "table" and config.features.bento_lockscreen == false)
+                end,
+                callback = function()
+                    if type(config.features) ~= "table" then config.features = {} end
+                    config.features.bento_lockscreen = config.features.bento_lockscreen == false
+                    if ctx.plugin and type(ctx.plugin.saveConfig) == "function" then
+                        ctx.plugin:saveConfig()
+                    end
+                end,
+            },
+            {
+                _zen_search_text = _("Greeting name"),
+                icon_glyph = icons.edit,
+                text_func = function()
+                    local name = type(config.bento_user_name) == "string" and config.bento_user_name or ""
+                    local label = name:match("%S") and name or _("Off")
+                    return string.format("%s: %s", _("Greeting name"), label)
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    local InputDialog = require("ui/widget/inputdialog")
+                    local dlg
+                    dlg = InputDialog:new{
+                        title = _("Greeting name"),
+                        input = type(config.bento_user_name) == "string" and config.bento_user_name or "",
+                        input_hint = _("Tyler"),
+                        buttons = {
+                            {
+                                {
+                                    text = _("Cancel"),
+                                    id = "close",
+                                    callback = function() UIManager:close(dlg) end,
+                                },
+                                {
+                                    text = _("Clear"),
+                                    callback = function()
+                                        config.bento_user_name = ""
+                                        if ctx.plugin and type(ctx.plugin.saveConfig) == "function" then
+                                            ctx.plugin:saveConfig()
+                                        end
+                                        save_home("reinit")
+                                        UIManager:close(dlg)
+                                        if touchmenu_instance and touchmenu_instance.updateItems then
+                                            touchmenu_instance:updateItems()
+                                        end
+                                    end,
+                                },
+                                {
+                                    text = _("Save"),
+                                    is_enter_default = true,
+                                    callback = function()
+                                        local val = tostring(dlg:getInputText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                                        config.bento_user_name = val
+                                        if ctx.plugin and type(ctx.plugin.saveConfig) == "function" then
+                                            ctx.plugin:saveConfig()
+                                        end
+                                        save_home("reinit")
+                                        UIManager:close(dlg)
+                                        if touchmenu_instance and touchmenu_instance.updateItems then
+                                            touchmenu_instance:updateItems()
+                                        end
+                                    end,
+                                },
+                            },
+                        },
+                    }
+                    UIManager:show(dlg)
+                    dlg:onShowKeyboard()
+                end,
+            },
+            {
                 icon_glyph = icons.widgets,
                 text = _("Widgets") .. " \u{25B8}",
                 keep_menu_open = true,

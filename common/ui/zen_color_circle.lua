@@ -109,7 +109,8 @@ function ColorCircle:init()
 
     self._circle = circle
     self[1] = widget
-    self.dimen = widget:getSize():copy()
+    local sz = widget:getSize()
+    self.dimen = Geom:new{ w = sz.w, h = sz.h }
     self.ges_events = {
         TapCircle = {
             GestureRange:new{ ges = "tap", range = self.dimen },

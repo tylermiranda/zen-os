@@ -25,6 +25,7 @@ local PATCH_MODULES = {
     rounded_scrollbars     = "modules/global/patches/rounded_scrollbars",
     raw_rounded_fill       = "modules/global/patches/raw_rounded_fill",
     responsive_keyboard    = "modules/global/patches/responsive_keyboard",
+    bento_lockscreen       = "modules/global/patches/bento_lockscreen",
 }
 
 local function run_patch(logger, plugin, feature, fn)
@@ -78,6 +79,11 @@ function M.init(logger, plugin)
         if responsive_keyboard_fn then
             run_patch(logger, plugin, "responsive_keyboard", responsive_keyboard_fn)
         end
+    end
+
+    local bento_lockscreen_fn = load_patch("bento_lockscreen")
+    if bento_lockscreen_fn then
+        run_patch(logger, plugin, "bento_lockscreen", bento_lockscreen_fn)
     end
 
     local night_mode_schedule_fn = load_patch("night_mode_schedule")

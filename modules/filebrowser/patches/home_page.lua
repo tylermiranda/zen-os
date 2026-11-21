@@ -4479,6 +4479,36 @@ function M.closeAll(force)
     end
 end
 
+function M.buildLockScreenWidget()
+    local rui_mod = package.loaded["apps/reader/readerui"]
+    local rui = rui_mod and rui_mod.instance
+    if rui then
+        pcall(function()
+            if rui.doc_settings and type(rui.doc_settings.flush) == "function" then
+                rui.doc_settings:flush()
+            end
+        end)
+        local doc_file = rui.document and rui.document.file
+        if type(doc_file) == "string" and doc_file ~= "" then
+            invalidate_home_book_cache(doc_file)
+            invalidate_home_dataset_path(doc_file, true)
+        end
+    end
+    consume_last_read_file()
+    local cfg = load_zen_config()
+    if type(cfg) ~= "table" then return nil end
+    local dcfg = ensure_home_cfg()
+    local data_provider = build_data_provider(cfg, dcfg, _home_strip_page_state)
+    local BentoBoard = require("modules/filebrowser/patches/home/bento_board")
+    return BentoBoard.buildLockScreen{
+        zen_config = cfg,
+        config = dcfg,
+        data = data_provider,
+        plugin = _zen_plugin or rawget(_G, "__ZEN_UI_PLUGIN"),
+        readonly = true,
+    }
+end
+
 Registry.setRefreshCallback(M.rebuildActive)
 MemoryPolicy.registerHomeCache(M)
 

@@ -15,13 +15,13 @@ local installed_plugins
 
 local function live_uis()
     local out = {}
-    local fm_mod = package.loaded["apps/filemanager/filemanager"]
-    if fm_mod and fm_mod.instance then
-        out[#out + 1] = fm_mod.instance
-    end
     local reader_mod = package.loaded["apps/reader/readerui"]
     if reader_mod and reader_mod.instance then
         out[#out + 1] = reader_mod.instance
+    end
+    local fm_mod = package.loaded["apps/filemanager/filemanager"]
+    if fm_mod and fm_mod.instance then
+        out[#out + 1] = fm_mod.instance
     end
     return out
 end
@@ -243,21 +243,31 @@ function M.scanZenPM(pending)
 end
 
 local function live_plugin(key)
-    local loader = plugin_loader()
-    local loaded = loader and loader.loaded_plugins
-    if type(loaded) == "table" and type(loaded[key]) == "table" then
-        return loaded[key]
+    local lower_pat = "/" .. key:lower() .. "%.koplugin/?$"
+    for _i, ui in ipairs(live_uis()) do
+        if type(ui[key]) == "table" then
+            return ui[key]
+        end
+        for _j, child in ipairs(ui) do
+            if type(child) == "table" then
+                if child.name == key or child.id == key
+                        or (type(child.plugin_path) == "string" and child.plugin_path:lower():match(lower_pat))
+                        or (type(child.path) == "string" and child.path:lower():match(lower_pat)) then
+                    return child
+                end
+            end
+        end
     end
+    local loader = plugin_loader()
     if loader and type(loader.getPluginInstance) == "function" then
         local ok, plugin = pcall(loader.getPluginInstance, loader, key)
         if ok and type(plugin) == "table" then
             return plugin
         end
     end
-    for _i, ui in ipairs(live_uis()) do
-        if type(ui[key]) == "table" then
-            return ui[key]
-        end
+    local loaded = loader and loader.loaded_plugins
+    if type(loaded) == "table" and type(loaded[key]) == "table" then
+        return loaded[key]
     end
 end
 
@@ -268,7 +278,9 @@ function M.exists(key, method)
     if method == M.SENTINEL or method == M.SUBMENU then
         return type(mod.addToMainMenu) == "function"
     end
-    return is_callable(mod[method])
+    if is_callable(mod[method]) then return true end
+    local fallback = find_method(mod, key)
+    return fallback ~= nil
 end
 
 local TOUCHMENU_STUB = {
@@ -313,7 +325,13 @@ function M.resolve(key, method)
             }
         end
     end
-    if not is_callable(mod[method]) then return nil end
+    if not is_callable(mod[method]) then
+        local fallback = find_method(mod, key)
+        if fallback and fallback ~= method then
+            return M.resolve(key, fallback)
+        end
+        return nil
+    end
     return function()
         return mod[method](mod)
     end

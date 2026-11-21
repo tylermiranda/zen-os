@@ -176,7 +176,7 @@ function M.ensure_zenpm_launcher_entry()
             type = "plugin",
             label = "ZenPM",
             icon = "zenpm",
-            plugin = { key = "zenpm", method = "open" },
+            plugin = { key = "zenpm", method = "onOpenZenPM" },
         }
     end
     cfg.zenpm_launcher_added = true
@@ -212,21 +212,22 @@ end
 
 function M.ensure_reddit_ui_entries()
     local cfg = M.ensure()
-    if cfg.reddit_ui_tiles_added == true then
+    if cfg.reddit_ui_tiles_added == true and cfg.reddit_ui_solitaire_added == true then
         return false
     end
-    local has_library, has_games = false, false
+    local changed = false
+    local has_library, games_folder = false, nil
     for _i, entry in ipairs(cfg.entries or {}) do
         if type(entry) == "table" then
             if entry.type == "zen_nav" and entry.nav_id == "books" then
                 has_library = true
             elseif entry.type == "folder" and entry.label == "Games" then
-                has_games = true
+                games_folder = entry
             end
         end
     end
     local insert_pos = 1
-    if not has_library then
+    if not has_library and cfg.reddit_ui_tiles_added ~= true then
         table.insert(cfg.entries, insert_pos, {
             id = M.next_id(cfg),
             type = "zen_nav",
@@ -238,27 +239,47 @@ function M.ensure_reddit_ui_entries()
             card = true,
         })
         insert_pos = insert_pos + 1
+        changed = true
     end
-    if not has_games then
+    if not games_folder then
         table.insert(cfg.entries, insert_pos, {
             id = M.next_id(cfg),
             type = "folder",
             label = "Games",
-            subtitle = "Sudoku · Minesweeper · Murdoku",
+            subtitle = "Solitaire · Sudoku · Mines · Murdoku",
             icon = "quick_chess",
             span = 2,
             card = true,
             children = {
+                { id = M.next_id(cfg), type = "plugin", label = "Solitaire", icon = "quick_chess", plugin = { key = "solitaire", method = "startGame" } },
                 { id = M.next_id(cfg), type = "plugin", label = "Sudoku", icon = "quick_puzzle", plugin = { key = "sudoku", method = "__menu_callback" } },
                 { id = M.next_id(cfg), type = "plugin", label = "Minesweeper", icon = "quick_puzzle", plugin = { key = "boardgames", method = "onShowMinesweeper" } },
                 { id = M.next_id(cfg), type = "plugin", label = "Murdoku", icon = "quick_crossword", plugin = { key = "murdoku", method = "__menu_callback" } },
                 { id = M.next_id(cfg), type = "plugin", label = "Board Games", icon = "quick_chess", plugin = { key = "boardgames", method = "__menu_callback" } },
             },
         })
+        changed = true
+    elseif not has_plugin_entry(games_folder.children, "solitaire") then
+        games_folder.children = games_folder.children or {}
+        table.insert(games_folder.children, 1, {
+            id = M.next_id(cfg),
+            type = "plugin",
+            label = "Solitaire",
+            icon = "quick_chess",
+            plugin = { key = "solitaire", method = "startGame" },
+        })
+        games_folder.subtitle = "Solitaire · Sudoku · Mines · Murdoku"
+        changed = true
     end
-    cfg.reddit_ui_tiles_added = true
-    Store.save(cfg)
-    return true
+    if cfg.reddit_ui_tiles_added ~= true or cfg.reddit_ui_solitaire_added ~= true then
+        cfg.reddit_ui_tiles_added = true
+        cfg.reddit_ui_solitaire_added = true
+        changed = true
+    end
+    if changed then
+        Store.save(cfg)
+    end
+    return changed
 end
 
 function M.ensure_zenpm_plugin_entries()

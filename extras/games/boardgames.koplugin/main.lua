@@ -1681,7 +1681,7 @@ end
 function GameHub:onShowMinesweeper()
     self.game_kind = MINESWEEPER
     self:start_new_game("Minesweeper")
-    return self:show_board()
+    return true
 end
 
 function GameHub:invalidate_bot_animation()

@@ -1,6 +1,6 @@
 -- modules/filebrowser/patches/home/bento_board.lua
 -- Full-screen Bento-Box Home Dashboard (inspired by Aleph + u/emdigi setup)
--- 3 looping pages: Home, Shelves, Insights.
+-- 4 looping pages: Home, Shelves, Insights, Apps. Also supports readonly Lock Screen mode.
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Accent = require("common/ui/accent")
@@ -17,6 +17,7 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local InputDialog = require("ui/widget/inputdialog")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local RightContainer = require("ui/widget/container/rightcontainer")
@@ -32,15 +33,17 @@ local ReadingGoals = require("common/reading_goals")
 local StatsDB = require("common/db_stats")
 local getFullRefreshMode = require("common/ui/refresh")
 local library_font = require("modules/filebrowser/patches/library_font")
+local logger = require("logger")
 local plugin_root = require("common/plugin_root")
 local utils = require("common/utils")
 local _ = require("gettext")
 
 local Screen = Device.screen
 local M = {}
+local _readonly_mode = false
 
-M.PAGE_COUNT = 3
-local PAGE_NAMES = { _("Home"), _("Shelves"), _("Insights") }
+M.PAGE_COUNT = 4
+local PAGE_NAMES = { _("Home"), _("Shelves"), _("Insights"), _("Apps") }
 
 local function make_rgb(r, g, b)
     return Blitbuffer.ColorRGB32(r, g, b, 0xFF)
@@ -132,7 +135,7 @@ function TapBox:onHoldSelect(_arg, ges)
 end
 
 local function wrap_tap(widget, w, h, tap_cb, hold_cb)
-    if not tap_cb and not hold_cb then return widget end
+    if _readonly_mode or (not tap_cb and not hold_cb) then return widget end
     return TapBox:new{
         width = w,
         height = h,
@@ -258,16 +261,45 @@ local function make_bento_cover(data, book, max_w, max_h, opts)
     return CoverCommon.make_cover_widget(book, max_w, max_h, opts)
 end
 
-local function find_plugin(key)
-    local ok_fm, FileManager = pcall(require, "apps/filemanager/filemanager")
-    local fm = ok_fm and FileManager and FileManager.instance
-    if fm then
-        if type(fm[key]) == "table" then return fm[key] end
-        for _i, child in ipairs(fm) do
-            if type(child) == "table" and child.name == key then
+local function is_callable(value)
+    if type(value) == "function" then return true end
+    local mt = type(value) == "table" and getmetatable(value) or nil
+    return type(mt) == "table" and type(mt.__call) == "function"
+end
+
+local function match_plugin_in_ui(ui, key)
+    if type(ui) ~= "table" then return nil end
+    if type(ui[key]) == "table" then return ui[key] end
+    local lower_key = key:lower()
+    local pat = "/" .. lower_key .. "%.koplugin/?$"
+    for _i, child in ipairs(ui) do
+        if type(child) == "table" then
+            if child.name == key or child.id == key
+                    or (type(child.plugin_path) == "string" and child.plugin_path:lower():match(pat))
+                    or (type(child.path) == "string" and child.path:lower():match(pat)) then
                 return child
             end
         end
+    end
+    for k, v in pairs(ui) do
+        if type(k) == "string" and k:lower() == lower_key and type(v) == "table" then
+            return v
+        end
+    end
+    return nil
+end
+
+local function find_plugin(key)
+    if type(key) ~= "string" or key == "" then return nil end
+    local ok_rui, ReaderUI = pcall(function() return package.loaded["apps/reader/readerui"] end)
+    if ok_rui and ReaderUI and ReaderUI.instance then
+        local found = match_plugin_in_ui(ReaderUI.instance, key)
+        if found then return found end
+    end
+    local ok_fm, FileManager = pcall(require, "apps/filemanager/filemanager")
+    if ok_fm and FileManager and FileManager.instance then
+        local found = match_plugin_in_ui(FileManager.instance, key)
+        if found then return found end
     end
     local ok_pl, PluginLoader = pcall(require, "pluginloader")
     if ok_pl and PluginLoader then
@@ -275,12 +307,84 @@ local function find_plugin(key)
             local ok_inst, inst = pcall(PluginLoader.getPluginInstance, PluginLoader, key)
             if ok_inst and type(inst) == "table" then return inst end
         end
-        if type(PluginLoader.loaded_plugins) == "table"
-                and type(PluginLoader.loaded_plugins[key]) == "table" then
-            return PluginLoader.loaded_plugins[key]
+        if type(PluginLoader.loaded_plugins) == "table" then
+            if type(PluginLoader.loaded_plugins[key]) == "table" then
+                return PluginLoader.loaded_plugins[key]
+            end
+            local lower_key = key:lower()
+            for k, v in pairs(PluginLoader.loaded_plugins) do
+                if type(k) == "string" and k:lower() == lower_key and type(v) == "table" then
+                    return v
+                end
+            end
         end
     end
     return nil
+end
+
+local function launch_plugin(key, preferred_methods, title, ...)
+    local extra_args = { ... }
+    local p = find_plugin(key)
+    local fn
+    if p and type(preferred_methods) == "table" then
+        for _i, method in ipairs(preferred_methods) do
+            if is_callable(p[method]) then
+                fn = function()
+                    return p[method](p, unpack(extra_args))
+                end
+                break
+            end
+        end
+    end
+    if not fn then
+        local ok_ps, PluginScan = pcall(require, "modules/menu/app_launcher/plugin_scan")
+        if ok_ps and PluginScan then
+            fn = PluginScan.resolve(key, PluginScan.SENTINEL)
+                or PluginScan.resolve(key, PluginScan.SUBMENU)
+        end
+    end
+    if not fn then
+        UIManager:show(InfoMessage:new{
+            text = (title or key) .. " " .. _("is not installed or enabled."),
+            timeout = 2,
+        })
+        return false
+    end
+    UIManager:nextTick(function()
+        local ok, err = pcall(fn)
+        if not ok then
+            logger.warn("Bento plugin launch failed", key, err)
+            UIManager:show(InfoMessage:new{
+                text = (title or key) .. " " .. _("could not be opened."),
+                timeout = 2,
+            })
+        end
+    end)
+    return true
+end
+
+local function open_zlibrary(mode)
+    local ok_ps, PluginScan = pcall(require, "modules/menu/app_launcher/plugin_scan")
+    if mode == "menu" then
+        local sub_fn = ok_ps and PluginScan and (
+            PluginScan.resolve("zlibrary", PluginScan.SUBMENU)
+            or PluginScan.resolve("zlibrary", PluginScan.SENTINEL)
+        )
+        if sub_fn then
+            UIManager:nextTick(function()
+                local ok, err = pcall(sub_fn)
+                if not ok then logger.warn("Bento Z-Library menu failed", err) end
+            end)
+            return true
+        end
+    end
+    if mode == "mybooks" then
+        local p = find_plugin("zlibrary")
+        if p and is_callable(p.onZlibrarySearch) then
+            return launch_plugin("zlibrary", { "onZlibrarySearch" }, "Z-Library", "mybooks")
+        end
+    end
+    return launch_plugin("zlibrary", { "onZlibrarySearch", "showMultiSearchDialog" }, "Z-Library")
 end
 
 local function open_tab(ctx, tab_id)
@@ -314,67 +418,46 @@ end
 
 local function open_games_dialog()
     local dialog
-    local function launch(fn)
+    local function launch_game(key, methods, title)
         if dialog then UIManager:close(dialog) end
-        UIManager:nextTick(function()
-            local ok, launched = pcall(fn)
-            if not ok or launched == false then
-                UIManager:show(InfoMessage:new{ text = _("Game plugin is not loaded."), timeout = 2 })
-            end
-        end)
+        launch_plugin(key, methods, title)
     end
     dialog = ButtonDialog:new{
         title = _("Games"),
         buttons = {
             {
                 {
-                    text = _("Sudoku"),
+                    text = _("Solitaire"),
                     callback = function()
-                        launch(function()
-                            local p = find_plugin("sudoku")
-                            if p and type(p.showGame) == "function" then
-                                p:showGame(); return true
-                            end
-                            return false
-                        end)
+                        launch_game("solitaire", { "startGame" }, _("Solitaire"))
                     end,
                 },
                 {
-                    text = _("Minesweeper"),
+                    text = _("Sudoku"),
                     callback = function()
-                        launch(function()
-                            local p = find_plugin("boardgames")
-                            if p and type(p.onShowMinesweeper) == "function" then
-                                p:onShowMinesweeper(); return true
-                            end
-                            return false
-                        end)
+                        launch_game("sudoku", { "showGame" }, _("Sudoku"))
                     end,
                 },
             },
             {
                 {
-                    text = _("Murdoku"),
+                    text = _("Minesweeper"),
                     callback = function()
-                        launch(function()
-                            local p = find_plugin("murdoku")
-                            if p and type(p.openCaseList) == "function" then
-                                p:openCaseList(); return true
-                            end
-                            return false
-                        end)
+                        launch_game("boardgames", { "onShowMinesweeper" }, _("Minesweeper"))
                     end,
                 },
                 {
+                    text = _("Murdoku"),
+                    callback = function()
+                        launch_game("murdoku", { "openCaseList", "onOpenMurdoku" }, _("Murdoku"))
+                    end,
+                },
+            },
+            {
+                {
                     text = _("Board Games Hub"),
                     callback = function()
-                        launch(function()
-                            local p = find_plugin("boardgames")
-                            if p and type(p.show_board) == "function" then
-                                p:show_board(); return true
-                            end
-                            return false
-                        end)
+                        launch_game("boardgames", { "show_board" }, _("Board Games"))
                     end,
                 },
             },
@@ -430,64 +513,85 @@ end
 
 local function build_header(ctx, pal, width, height)
     local hour = tonumber(os.date("%H")) or 12
-    local greeting = hour < 12 and _("Good morning")
+    local base_greeting = hour < 12 and _("Good morning")
         or (hour < 18 and _("Good afternoon") or _("Good evening"))
+    local raw_name = type(ctx.zen_config) == "table" and ctx.zen_config.bento_user_name or nil
+    if raw_name == nil then raw_name = "Tyler" end
+    local user_name = tostring(raw_name):gsub("^%s+", ""):gsub("%s+$", "")
+    local greeting = user_name ~= "" and string.format("%s, %s", base_greeting, user_name) or base_greeting
     local date_str = os.date("%A, %d %B")
 
     local btn_h = math.min(Screen:scaleBySize(34), math.max(24, height - Screen:scaleBySize(8)))
     local btn_r = math.floor(btn_h / 2)
     local gap = Screen:scaleBySize(8)
 
-    local search_btn = wrap_tap(FrameContainer:new{
-        width = btn_h,
-        height = btn_h,
-        padding = 0,
-        bordersize = math.max(1, Screen:scaleBySize(1)),
-        radius = btn_r,
-        color = pal.card_border,
-        background = pal.card_bg,
-        CenterContainer:new{
-            dimen = Geom:new{ w = btn_h - 2, h = btn_h - 2 },
-            make_icon("quick_search", math.floor(btn_h * 0.56), "?", pal.fg),
-        },
-    }, btn_h, btn_h, function() open_tab(ctx, "search") end)
-
-    local menu_btn = wrap_tap(FrameContainer:new{
-        width = btn_h,
-        height = btn_h,
-        padding = 0,
-        bordersize = math.max(1, Screen:scaleBySize(1)),
-        radius = btn_r,
-        color = pal.card_border,
-        background = pal.card_bg,
-        CenterContainer:new{
-            dimen = Geom:new{ w = btn_h - 2, h = btn_h - 2 },
-            make_icon("app_menu", math.floor(btn_h * 0.56), "=", pal.fg),
-        },
-    }, btn_h, btn_h, function()
-        local fm = require("apps/filemanager/filemanager").instance
-        local fm_menu = fm and fm.menu
-        if fm_menu and type(fm_menu.onShowMenu) == "function" then
-            fm_menu:onShowMenu()
-        end
-    end)
-
     local status_pill = build_status_cluster(ctx, pal, btn_h)
-    if type(ctx.registerClockRefresh) == "function" then
+    if not ctx.readonly and type(ctx.registerClockRefresh) == "function" then
         ctx.registerClockRefresh(function()
             if ctx.rebuildHome then ctx.rebuildHome(false, "ui") end
             return false
         end, status_pill, { "time", "battery", "wifi" })
     end
 
-    local right_group = HorizontalGroup:new{
-        align = "center",
-        status_pill,
-        HorizontalSpan:new{ width = gap },
-        search_btn,
-        HorizontalSpan:new{ width = gap },
-        menu_btn,
-    }
+    local right_group = HorizontalGroup:new{ align = "center", status_pill }
+    if ctx.readonly then
+        local lock_txt = single_line_text("☾  " .. _("Sleeping"), 11, true, pal.hero_fg)
+        local lock_w = lock_txt:getSize().w + Screen:scaleBySize(18)
+        local lock_pill = FrameContainer:new{
+            width = lock_w,
+            height = btn_h,
+            padding = 0,
+            bordersize = 0,
+            radius = btn_r,
+            background = pal.hero_bg,
+            CenterContainer:new{
+                dimen = Geom:new{ w = lock_w, h = btn_h },
+                lock_txt,
+            },
+        }
+        right_group[#right_group + 1] = HorizontalSpan:new{ width = gap }
+        right_group[#right_group + 1] = lock_pill
+    else
+        local search_btn = wrap_tap(FrameContainer:new{
+            width = btn_h,
+            height = btn_h,
+            padding = 0,
+            bordersize = math.max(1, Screen:scaleBySize(1)),
+            radius = btn_r,
+            color = pal.card_border,
+            background = pal.card_bg,
+            CenterContainer:new{
+                dimen = Geom:new{ w = btn_h - 2, h = btn_h - 2 },
+                make_icon("quick_search", math.floor(btn_h * 0.56), "?", pal.fg),
+            },
+        }, btn_h, btn_h, function() open_tab(ctx, "search") end)
+
+        local menu_btn = wrap_tap(FrameContainer:new{
+            width = btn_h,
+            height = btn_h,
+            padding = 0,
+            bordersize = math.max(1, Screen:scaleBySize(1)),
+            radius = btn_r,
+            color = pal.card_border,
+            background = pal.card_bg,
+            CenterContainer:new{
+                dimen = Geom:new{ w = btn_h - 2, h = btn_h - 2 },
+                make_icon("app_menu", math.floor(btn_h * 0.56), "=", pal.fg),
+            },
+        }, btn_h, btn_h, function()
+            local fm = require("apps/filemanager/filemanager").instance
+            local fm_menu = fm and fm.menu
+            if fm_menu and type(fm_menu.onShowMenu) == "function" then
+                fm_menu:onShowMenu()
+            end
+        end)
+
+        right_group[#right_group + 1] = HorizontalSpan:new{ width = gap }
+        right_group[#right_group + 1] = search_btn
+        right_group[#right_group + 1] = HorizontalSpan:new{ width = gap }
+        right_group[#right_group + 1] = menu_btn
+    end
+
     local right_w = right_group:getSize().w
     local left_w = math.max(1, width - right_w - gap)
 
@@ -497,10 +601,57 @@ local function build_header(ctx, pal, width, height)
         VerticalSpan:new{ width = Screen:scaleBySize(2) },
         single_line_text(date_str, 11, false, pal.muted, left_w),
     }
+    local left_box = LeftContainer:new{ dimen = Geom:new{ w = left_w, h = height }, left_col }
+    left_box = wrap_tap(left_box, left_w, height, function()
+        local plugin = ctx.plugin or rawget(_G, "__ZEN_UI_PLUGIN")
+        local cfg = type(ctx.zen_config) == "table" and ctx.zen_config
+            or (plugin and plugin.config) or {}
+        local dlg
+        dlg = InputDialog:new{
+            title = _("Greeting name"),
+            input = user_name,
+            input_hint = _("Tyler"),
+            buttons = {
+                {
+                    {
+                        text = _("Cancel"),
+                        id = "close",
+                        callback = function() UIManager:close(dlg) end,
+                    },
+                    {
+                        text = _("Clear"),
+                        callback = function()
+                            cfg.bento_user_name = ""
+                            if plugin and type(plugin.saveConfig) == "function" then
+                                plugin:saveConfig()
+                            end
+                            UIManager:close(dlg)
+                            if ctx.rebuildHome then ctx.rebuildHome(false, "ui") end
+                        end,
+                    },
+                    {
+                        text = _("Save"),
+                        is_enter_default = true,
+                        callback = function()
+                            local val = tostring(dlg:getInputText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                            cfg.bento_user_name = val
+                            if plugin and type(plugin.saveConfig) == "function" then
+                                plugin:saveConfig()
+                            end
+                            UIManager:close(dlg)
+                            if ctx.rebuildHome then ctx.rebuildHome(false, "ui") end
+                        end,
+                    },
+                },
+            },
+        }
+        UIManager:show(dlg)
+        dlg:onShowKeyboard()
+    end)
 
     return HorizontalGroup:new{
         align = "center",
-        LeftContainer:new{ dimen = Geom:new{ w = left_w, h = height }, left_col },
+        left_box,
         HorizontalSpan:new{ width = gap },
         RightContainer:new{ dimen = Geom:new{ w = right_w, h = height }, right_group },
     }
@@ -1103,24 +1254,217 @@ local function build_wide_library_tile(ctx, pal, w, h, total_books, preview_book
     })
 end
 
-local function build_small_tile(pal, w, h, icon_name, fallback_glyph, title, subtitle, on_tap)
+local function build_small_tile(pal, w, h, icon_name, fallback_glyph, title, subtitle, on_tap, on_hold)
     local pad_h = Screen:scaleBySize(10)
     local pad_v = Screen:scaleBySize(8)
     local inner_w = math.max(1, w - pad_h * 2 - 4)
     local icon_sz = math.min(Screen:scaleBySize(26), math.max(18, math.floor(h * 0.28)))
+    local title_pt = inner_w < Screen:scaleBySize(130) and 11 or 13
 
     local col = VerticalGroup:new{
         align = "left",
         make_icon(icon_name, icon_sz, fallback_glyph, pal.fg),
         VerticalSpan:new{ width = Screen:scaleBySize(6) },
-        single_line_text(title, 13, true, pal.fg, inner_w),
+        single_line_text(title, title_pt, true, pal.fg, inner_w),
         VerticalSpan:new{ width = Screen:scaleBySize(2) },
-        single_line_text(subtitle, 10, false, pal.muted, inner_w),
+        single_line_text(subtitle, 9, false, pal.muted, inner_w),
     }
     return make_card(w, h, col, pal, {
         pad_h = pad_h,
         pad_v = pad_v,
         on_tap = on_tap,
+        on_hold = on_hold,
+    })
+end
+
+local function build_get_next_book_card(pal, w, h, discover)
+    local pad_h = Screen:scaleBySize(12)
+    local pad_v = Screen:scaleBySize(10)
+    local inner_w = math.max(1, w - pad_h * 2 - 4)
+    local inner_h = math.max(1, h - pad_v * 2 - 4)
+
+    local badge_txt = single_line_text("Z-LIBRARY", 8, true, pal.muted)
+    local badge_w = badge_txt:getSize().w + Screen:scaleBySize(12)
+    local badge_h = math.max(Screen:scaleBySize(18), badge_txt:getSize().h + Screen:scaleBySize(6))
+    local badge = FrameContainer:new{
+        width = badge_w,
+        height = badge_h,
+        padding = 0,
+        bordersize = 1,
+        radius = math.floor(badge_h / 2),
+        color = pal.card_border,
+        background = pal.chip_bg,
+        CenterContainer:new{ dimen = Geom:new{ w = badge_w - 2, h = badge_h - 2 }, badge_txt },
+    }
+
+    local icon_px = Screen:scaleBySize(20)
+    local title_txt = single_line_text(_("Get next book"), 14, true, pal.fg,
+        math.max(1, inner_w - badge_w - icon_px - Screen:scaleBySize(14)))
+    local left_hdr = HorizontalGroup:new{
+        align = "center",
+        make_icon("quick_zlib", icon_px, "Z", pal.fg),
+        HorizontalSpan:new{ width = Screen:scaleBySize(6) },
+        title_txt,
+    }
+    local hdr = HorizontalGroup:new{
+        align = "center",
+        left_hdr,
+        HorizontalSpan:new{ width = math.max(4, inner_w - left_hdr:getSize().w - badge_w) },
+        badge,
+    }
+
+    local btn_h = math.max(Screen:scaleBySize(26), math.min(Screen:scaleBySize(32), math.floor(inner_h * 0.25)))
+    local btn_gap = Screen:scaleBySize(8)
+    local primary_w = math.floor((inner_w - btn_gap) * 0.62)
+    local secondary_w = math.max(1, inner_w - btn_gap - primary_w)
+
+    local primary_btn = wrap_tap(FrameContainer:new{
+        width = primary_w,
+        height = btn_h,
+        padding = 0,
+        bordersize = 0,
+        radius = math.floor(btn_h / 2),
+        background = pal.hero_bg,
+        CenterContainer:new{
+            dimen = Geom:new{ w = primary_w, h = btn_h },
+            single_line_text("⌕  " .. _("Search Z-Lib ›"), 10, true, pal.hero_fg, primary_w - 10),
+        },
+    }, primary_w, btn_h, function() open_zlibrary("search") end)
+
+    local secondary_btn = wrap_tap(FrameContainer:new{
+        width = secondary_w,
+        height = btn_h,
+        padding = 0,
+        bordersize = 1,
+        radius = math.floor(btn_h / 2),
+        color = pal.card_border,
+        background = pal.chip_bg,
+        CenterContainer:new{
+            dimen = Geom:new{ w = secondary_w - 2, h = btn_h - 2 },
+            single_line_text(_("My Books"), 10, true, pal.fg, secondary_w - 10),
+        },
+    }, secondary_w, btn_h, function() open_zlibrary("mybooks") end)
+
+    local actions_row = HorizontalGroup:new{
+        align = "center",
+        primary_btn,
+        HorizontalSpan:new{ width = btn_gap },
+        secondary_btn,
+    }
+
+    local next_tbr = discover and discover[1]
+    local tbr_w = (next_tbr and type(next_tbr.title) == "string" and next_tbr.title ~= "")
+        and single_line_text(_("Next in TBR: ") .. next_tbr.title, 10, false, pal.muted, inner_w)
+        or nil
+
+    local fixed_gaps = Screen:scaleBySize(6) + (tbr_w and Screen:scaleBySize(4) or 0) + Screen:scaleBySize(6)
+    local sub_h = math.max(Screen:scaleBySize(22),
+        inner_h - hdr:getSize().h - (tbr_w and tbr_w:getSize().h or 0) - btn_h - fixed_gaps)
+    local desc = TextBoxWidget:new{
+        text = _("Search millions of books and download straight to your Kobo."),
+        face = get_font_face(11, false),
+        width = inner_w,
+        height = sub_h,
+        height_adjust = true,
+        height_overflow_show_ellipsis = true,
+        fgcolor = pal.muted,
+    }
+
+    local used_h = hdr:getSize().h + desc:getSize().h + (tbr_w and tbr_w:getSize().h or 0) + btn_h + fixed_gaps
+    local extra_gap = math.max(Screen:scaleBySize(2), inner_h - used_h)
+
+    local col = VerticalGroup:new{
+        align = "left",
+        hdr,
+        VerticalSpan:new{ width = Screen:scaleBySize(6) },
+        desc,
+    }
+    if tbr_w then
+        col[#col + 1] = VerticalSpan:new{ width = Screen:scaleBySize(4) }
+        col[#col + 1] = tbr_w
+    end
+    col[#col + 1] = VerticalSpan:new{ width = extra_gap }
+    col[#col + 1] = actions_row
+
+    return make_card(w, h, col, pal, {
+        pad_h = pad_h,
+        pad_v = pad_v,
+        border_color = pal.fg,
+        on_tap = function() open_zlibrary("search") end,
+        on_hold = function() open_zlibrary("menu") end,
+    })
+end
+
+local function build_featured_app_card(pal, w, h, icon_name, fallback_glyph, tag_label, title, subtitle, action_text, on_tap, on_hold, dark)
+    local pad_h = Screen:scaleBySize(14)
+    local pad_v = Screen:scaleBySize(12)
+    local inner_w = math.max(1, w - pad_h * 2 - 4)
+    local inner_h = math.max(1, h - pad_v * 2 - 4)
+
+    local bg = dark and pal.hero_bg or pal.card_bg
+    local border = dark and pal.hero_border or pal.card_border
+    local fg = dark and pal.hero_fg or pal.fg
+    local muted = dark and pal.hero_muted or pal.muted
+    local pill_bg = dark and pal.hero_fill or pal.hero_bg
+    local pill_fg = dark and Blitbuffer.COLOR_BLACK or pal.hero_fg
+
+    local icon_px = Screen:scaleBySize(26)
+    local top_row = HorizontalGroup:new{
+        align = "center",
+        make_icon(icon_name, icon_px, fallback_glyph, fg),
+        HorizontalSpan:new{ width = Screen:scaleBySize(8) },
+        single_line_text(tag_label, 10, true, muted, math.max(1, inner_w - icon_px - 8)),
+    }
+
+    local title_w = single_line_text(title, 16, true, fg, inner_w)
+    local sub_h = math.max(Screen:scaleBySize(20), math.floor(inner_h * 0.28))
+    local sub_w = TextBoxWidget:new{
+        text = subtitle,
+        face = get_font_face(11, false),
+        width = inner_w,
+        height = sub_h,
+        height_adjust = true,
+        height_overflow_show_ellipsis = true,
+        fgcolor = muted,
+    }
+
+    local pill_h = math.max(Screen:scaleBySize(26), math.min(Screen:scaleBySize(32), math.floor(inner_h * 0.24)))
+    local pill_w = math.min(inner_w, math.max(Screen:scaleBySize(118), math.floor(inner_w * 0.56)))
+    local action_pill = FrameContainer:new{
+        width = pill_w,
+        height = pill_h,
+        padding = 0,
+        bordersize = 0,
+        radius = math.floor(pill_h / 2),
+        background = pill_bg,
+        CenterContainer:new{
+            dimen = Geom:new{ w = pill_w, h = pill_h },
+            single_line_text(action_text, 10, true, pill_fg, pill_w - 12),
+        },
+    }
+
+    local top_block = VerticalGroup:new{
+        align = "left",
+        top_row,
+        VerticalSpan:new{ width = Screen:scaleBySize(6) },
+        title_w,
+        VerticalSpan:new{ width = Screen:scaleBySize(3) },
+        sub_w,
+    }
+    local spacer = math.max(Screen:scaleBySize(4), inner_h - top_block:getSize().h - pill_h)
+    local col = VerticalGroup:new{
+        align = "left",
+        top_block,
+        VerticalSpan:new{ width = spacer },
+        action_pill,
+    }
+    return make_card(w, h, col, pal, {
+        bg = bg,
+        border_color = border,
+        pad_h = pad_h,
+        pad_v = pad_v,
+        on_tap = on_tap,
+        on_hold = on_hold,
     })
 end
 
@@ -1230,18 +1574,18 @@ local function build_page_home(ctx, pal, content_w, grid_h, gap, go_page)
         align = "top",
         build_shelf_card(ctx, pal, left_w, r3_h, _("Pick back up"), pick_back_up, 3, "history", "recently_read"),
         HorizontalSpan:new{ width = gap },
-        build_shelf_card(ctx, pal, right_w, r3_h, _("Discover"), discover, 3, "books", "to_be_read"),
+        build_get_next_book_card(pal, right_w, r3_h, discover),
     }
 
     local row4 = HorizontalGroup:new{
         align = "top",
         build_wide_library_tile(ctx, pal, left_w, r4_h, tonumber(counts.total) or 0, preview_pool),
         HorizontalSpan:new{ width = gap },
-        build_small_tile(pal, q3_w, r4_h, "tab_series", "S", _("Series"), _("Browse series"),
-            function() open_tab(ctx, "series") end),
-        HorizontalSpan:new{ width = gap },
-        build_small_tile(pal, q4_w, r4_h, "quick_chess", "G", _("Games"), _("Sudoku · Mines"),
+        build_small_tile(pal, q3_w, r4_h, "quick_chess", "G", _("Games"), _("Solitaire · Sudoku"),
             open_games_dialog),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, q4_w, r4_h, "app_launcher", "A", _("Apps"), _("Z-Lib · Store"),
+            function() go_page(4) end),
     }
 
     return VerticalGroup:new{
@@ -1293,7 +1637,7 @@ local function build_page_shelves(ctx, pal, content_w, grid_h, gap)
             build_small_tile(pal, q2_w, s3_h, "tab_collections", "C", _("Collections"), _("Saved shelves"),
                 function() open_tab(ctx, "collections") end),
             HorizontalSpan:new{ width = gap },
-            build_small_tile(pal, q3_w, s3_h, "quick_chess", "G", _("Games"), _("3 games ready"),
+            build_small_tile(pal, q3_w, s3_h, "quick_chess", "G", _("Games"), _("Solitaire · Sudoku"),
                 open_games_dialog),
             HorizontalSpan:new{ width = gap },
             build_small_tile(pal, q4_w, s3_h, "tab_exit", "E", _("Exit"), _("Quit KOReader"),
@@ -1553,7 +1897,6 @@ local function build_page_insights(ctx, pal, content_w, grid_h, gap)
         local bw = math.floor((iw - b_gap) / 2)
         local bh = math.max(Screen:scaleBySize(26), math.floor((ih - hdr:getSize().h - b_gap - Screen:scaleBySize(8)) / 2))
 
-        local PluginScan = require("modules/menu/app_launcher/plugin_scan")
         local function chip(label, icon_name, cb)
             local box = FrameContainer:new{
                 width = bw,
@@ -1575,14 +1918,6 @@ local function build_page_insights(ctx, pal, content_w, grid_h, gap)
             }
             return wrap_tap(box, bw, bh, cb)
         end
-        local function launch_plugin(key, title)
-            local fn = PluginScan.resolve(key, PluginScan.SENTINEL) or PluginScan.resolve(key, PluginScan.SUBMENU)
-            if fn then
-                pcall(fn)
-            else
-                UIManager:show(InfoMessage:new{ text = title .. " " .. _("is not installed."), timeout = 2 })
-            end
-        end
 
         tools_card = make_card(right_w, i3_h, VerticalGroup:new{
             align = "left",
@@ -1590,9 +1925,9 @@ local function build_page_insights(ctx, pal, content_w, grid_h, gap)
             VerticalSpan:new{ width = Screen:scaleBySize(8) },
             HorizontalGroup:new{
                 align = "center",
-                chip("ZenPM", "zenpm", function() launch_plugin("zenpm", "ZenPM") end),
+                chip("ZenPM", "zenpm", function() launch_plugin("zenpm", { "onOpenZenPM", "onZenPM", "show" }, "ZenPM") end),
                 HorizontalSpan:new{ width = b_gap },
-                chip("ZenFM", "zenfm", function() launch_plugin("zenfm", "ZenFM") end),
+                chip("ZenFM", "zenfm", function() launch_plugin("zenfm", { "onShowZenFMStatus", "onToggleZenFM" }, "ZenFM") end),
             },
             VerticalSpan:new{ width = b_gap },
             HorizontalGroup:new{
@@ -1629,7 +1964,133 @@ local function build_page_insights(ctx, pal, content_w, grid_h, gap)
     }
 end
 
-local function build_footer(pal, width, height, page, go_page)
+local function split_widths(total_w, n, gap)
+    local base = math.floor((total_w - gap * (n - 1)) / n)
+    local rem = total_w - gap * (n - 1) - base * n
+    local out = {}
+    for i = 1, n do
+        out[i] = base + (i <= rem and 1 or 0)
+    end
+    return out
+end
+
+local function build_page_apps(ctx, pal, content_w, grid_h, gap)
+    local left_w = math.floor((content_w - gap) / 2)
+    local right_w = content_w - gap - left_w
+
+    local rows_h = grid_h - gap * 3
+    local a1_h = math.floor(rows_h * 0.28)
+    local a2_h = math.floor(rows_h * 0.23)
+    local a3_h = math.floor(rows_h * 0.25)
+    local a4_h = math.max(Screen:scaleBySize(64), rows_h - a1_h - a2_h - a3_h)
+
+    local row1 = HorizontalGroup:new{
+        align = "top",
+        build_featured_app_card(
+            pal, left_w, a1_h,
+            "quick_zlib", "Z", _("FEATURED · Z-LIBRARY"),
+            _("Get next book"),
+            _("Search millions of titles, popular picks & My Books"),
+            "⌕  " .. _("Search Z-Lib ›"),
+            function() open_zlibrary("search") end,
+            function() open_zlibrary("menu") end,
+            true
+        ),
+        HorizontalSpan:new{ width = gap },
+        build_featured_app_card(
+            pal, right_w, a1_h,
+            "settings_download", "S", _("DISCOVER & INSTALL"),
+            _("App Store"),
+            _("Browse community plugins and KOReader user patches"),
+            _("Open Store ›"),
+            function()
+                launch_plugin("appstore", { "showBrowser", "onOpenAppStoreMenu", "onShowAppStore" }, _("App Store"))
+            end,
+            nil,
+            false
+        ),
+    }
+
+    local w4 = split_widths(content_w, 4, gap)
+    local row2 = HorizontalGroup:new{
+        align = "top",
+        build_small_tile(pal, w4[1], a2_h, "zenpm", "P", "ZenPM", _("Packages & patches"),
+            function() launch_plugin("zenpm", { "onOpenZenPM", "onZenPM", "show" }, "ZenPM") end),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, w4[2], a2_h, "zenfm", "F", "ZenFM", _("Wi-Fi file server"),
+            function() launch_plugin("zenfm", { "onShowZenFMStatus", "onToggleZenFM" }, "ZenFM") end),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, w4[3], a2_h, "quick_opds", "O", "OPDS", _("Online catalogs"),
+            function() launch_plugin("opds", { "onShowOPDSCatalog" }, "OPDS") end),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, w4[4], a2_h, "quick_calibre", "C", "Calibre", _("Wireless sync"),
+            function() launch_plugin("calibre", { "onCalibreSearch", "onStartWirelessConnection" }, "Calibre") end),
+    }
+
+    local w5 = split_widths(content_w, 5, gap)
+    local row3 = HorizontalGroup:new{
+        align = "top",
+        build_small_tile(pal, w5[1], a3_h, "quick_chess", "S", _("Solitaire"), _("Klondike cards"),
+            function() launch_plugin("solitaire", { "startGame" }, _("Solitaire")) end),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, w5[2], a3_h, "quick_puzzle", "9", _("Sudoku"), _("Number puzzle"),
+            function() launch_plugin("sudoku", { "showGame" }, _("Sudoku")) end),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, w5[3], a3_h, "quick_puzzle", "M", _("Minesweeper"), _("Clear the grid"),
+            function() launch_plugin("boardgames", { "onShowMinesweeper" }, _("Minesweeper")) end),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, w5[4], a3_h, "quick_crossword", "?", _("Murdoku"), _("Logic mystery"),
+            function() launch_plugin("murdoku", { "openCaseList", "onOpenMurdoku" }, _("Murdoku")) end),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, w5[5], a3_h, "quick_chess", "B", _("Board Games"), _("Chess · Checkers"),
+            function() launch_plugin("boardgames", { "show_board" }, _("Board Games")) end),
+    }
+
+    local row4 = HorizontalGroup:new{
+        align = "top",
+        build_small_tile(pal, w4[1], a4_h, "quick_stats_progress", "I", _("Insights"), _("Reading Insights"),
+            function() launch_plugin("readinginsights", { "onShowReadingInsights" }, _("Reading Insights")) end),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, w4[2], a4_h, "quick_sync", "Y", _("Cloud Sync"), _("KoInsight / Readest"),
+            function()
+                if find_plugin("koinsight") then
+                    launch_plugin("koinsight", { "onKoInsightSync" }, "KoInsight")
+                else
+                    launch_plugin("readest", nil, "Readest")
+                end
+            end),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, w4[3], a4_h, "terminal", "$", "SSH", _("Remote terminal"),
+            function() launch_plugin("SSH", { "onToggleSSHServer" }, "SSH") end),
+        HorizontalSpan:new{ width = gap },
+        build_small_tile(pal, w4[4], a4_h, "zen_ui", "Z", _("Zen Settings"), _("Customize ZenOS"),
+            function()
+                local sp = require("modules/settings/zen_settings_page")
+                if sp and type(sp.show) == "function" then
+                    sp.show(ctx.plugin or rawget(_G, "__ZEN_UI_PLUGIN"))
+                end
+            end),
+    }
+
+    return VerticalGroup:new{
+        align = "left",
+        row1,
+        VerticalSpan:new{ width = gap },
+        row2,
+        VerticalSpan:new{ width = gap },
+        row3,
+        VerticalSpan:new{ width = gap },
+        row4,
+    }
+end
+
+local function build_footer(ctx, pal, width, height, page, go_page)
+    if ctx.readonly then
+        return CenterContainer:new{
+            dimen = Geom:new{ w = width, h = height },
+            single_line_text("☾  " .. _("Lock Screen  ·  Press power button to wake"), 11, false, pal.muted, width),
+        }
+    end
     local btn_w = Screen:scaleBySize(64)
     local prev_btn = wrap_tap(FrameContainer:new{
         width = btn_w,
@@ -1695,17 +2156,18 @@ local function build_footer(pal, width, height, page, go_page)
     }
 end
 
-function M.build(ctx)
+local function build_board_internal(ctx)
     local menu = ctx.menu
     local pal = get_palette()
     local screen_w = Screen:getWidth()
     local screen_h = Screen:getHeight()
 
-    local page = tonumber(menu and menu._zen_bento_page) or 1
+    local page = ctx.readonly and 1 or (tonumber(menu and menu._zen_bento_page) or 1)
     if page < 1 or page > M.PAGE_COUNT then page = 1 end
-    if menu then menu._zen_bento_page = page end
+    if menu and not ctx.readonly then menu._zen_bento_page = page end
 
     local function go_page(target_page)
+        if ctx.readonly then return end
         local p = ((tonumber(target_page) or 1) - 1) % M.PAGE_COUNT + 1
         if menu then menu._zen_bento_page = p end
         if ctx.rebuildHome then
@@ -1728,10 +2190,12 @@ function M.build(ctx)
         grid = build_page_shelves(ctx, pal, content_w, grid_h, gap)
     elseif page == 3 then
         grid = build_page_insights(ctx, pal, content_w, grid_h, gap)
+    elseif page == 4 then
+        grid = build_page_apps(ctx, pal, content_w, grid_h, gap)
     else
         grid = build_page_home(ctx, pal, content_w, grid_h, gap, go_page)
     end
-    local footer = build_footer(pal, content_w, footer_h, page, go_page)
+    local footer = build_footer(ctx, pal, content_w, footer_h, page, go_page)
 
     local root_col = VerticalGroup:new{
         align = "left",
@@ -1755,6 +2219,29 @@ function M.build(ctx)
         background = pal.canvas_bg,
         root_col,
     }
+end
+
+function M.build(ctx)
+    local prev_ro = _readonly_mode
+    _readonly_mode = (type(ctx) == "table" and ctx.readonly == true)
+    local ok, res = pcall(build_board_internal, ctx or {})
+    _readonly_mode = prev_ro
+    if not ok then
+        error(res)
+    end
+    return res
+end
+
+function M.buildLockScreen(ctx)
+    local lock_ctx = {}
+    if type(ctx) == "table" then
+        for k, v in pairs(ctx) do
+            lock_ctx[k] = v
+        end
+    end
+    lock_ctx.readonly = true
+    lock_ctx.menu = nil
+    return M.build(lock_ctx)
 end
 
 return M
