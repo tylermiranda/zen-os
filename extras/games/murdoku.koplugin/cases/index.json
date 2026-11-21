@@ -1,0 +1,245 @@
+{
+ "creator": "Murdoku for KOReader",
+ "cases": [
+  {
+   "id": "orig-mosquito-season",
+   "title": "Mosquito Season",
+   "difficulty": "very-easy",
+   "gridSize": "5x5",
+   "theme": "campsite",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-rum-and-rope",
+   "title": "Rum and Rope",
+   "difficulty": "very-easy",
+   "gridSize": "6x6",
+   "theme": "harbour",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-exam-day",
+   "title": "Exam Day",
+   "difficulty": "very-easy",
+   "gridSize": "5x5",
+   "theme": "school",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-grave-matters",
+   "title": "Grave Matters",
+   "difficulty": "very-easy",
+   "gridSize": "6x6",
+   "theme": "churchyard",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-room-service",
+   "title": "Room Service",
+   "difficulty": "very-easy",
+   "gridSize": "5x5",
+   "theme": "hotel",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-the-frozen-lake",
+   "title": "The Frozen Lake",
+   "difficulty": "very-easy",
+   "gridSize": "6x6",
+   "theme": "ski lodge",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-last-orders",
+   "title": "Last Orders",
+   "difficulty": "easy",
+   "gridSize": "6x6",
+   "theme": "diner",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-the-keepers-last-watch",
+   "title": "The Keeper's Last Watch",
+   "difficulty": "easy",
+   "gridSize": "7x7",
+   "theme": "lighthouse",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-delayed-departure",
+   "title": "Delayed Departure",
+   "difficulty": "easy",
+   "gridSize": "6x6",
+   "theme": "station",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-the-scarecrow-knows",
+   "title": "The Scarecrow Knows",
+   "difficulty": "easy",
+   "gridSize": "7x7",
+   "theme": "farm",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-a-will-and-a-way",
+   "title": "A Will and a Way",
+   "difficulty": "easy",
+   "gridSize": "6x6",
+   "theme": "manor",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-the-final-act",
+   "title": "The Final Act",
+   "difficulty": "easy",
+   "gridSize": "7x7",
+   "theme": "theatre",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-a-thorny-problem",
+   "title": "A Thorny Problem",
+   "difficulty": "easy",
+   "gridSize": "6x6",
+   "theme": "garden party",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-night-of-the-mummy",
+   "title": "Night of the Mummy",
+   "difficulty": "easy",
+   "gridSize": "7x7",
+   "theme": "museum",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-bear-country",
+   "title": "Bear Country",
+   "difficulty": "easy",
+   "gridSize": "6x6",
+   "theme": "campsite",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-fog-in-the-harbour",
+   "title": "Fog in the Harbour",
+   "difficulty": "medium",
+   "gridSize": "7x7",
+   "theme": "harbour",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-reunion-night",
+   "title": "Reunion Night",
+   "difficulty": "medium",
+   "gridSize": "8x8",
+   "theme": "school",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-the-bell-tolls",
+   "title": "The Bell Tolls",
+   "difficulty": "medium",
+   "gridSize": "9x9",
+   "theme": "churchyard",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-the-penthouse-suite",
+   "title": "The Penthouse Suite",
+   "difficulty": "medium",
+   "gridSize": "7x7",
+   "theme": "hotel",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-black-run",
+   "title": "Black Run",
+   "difficulty": "medium",
+   "gridSize": "8x8",
+   "theme": "ski lodge",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-the-midnight-special",
+   "title": "The Midnight Special",
+   "difficulty": "medium",
+   "gridSize": "9x9",
+   "theme": "diner",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-fog-on-the-rocks",
+   "title": "Fog on the Rocks",
+   "difficulty": "medium",
+   "gridSize": "7x7",
+   "theme": "lighthouse",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-the-night-express",
+   "title": "The Night Express",
+   "difficulty": "medium",
+   "gridSize": "8x8",
+   "theme": "station",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-muddy-boots",
+   "title": "Muddy Boots",
+   "difficulty": "medium",
+   "gridSize": "9x9",
+   "theme": "farm",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-the-last-dinner-party",
+   "title": "The Last Dinner Party",
+   "difficulty": "hard",
+   "gridSize": "8x8",
+   "theme": "manor",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-opening-night",
+   "title": "Opening Night",
+   "difficulty": "hard",
+   "gridSize": "9x9",
+   "theme": "theatre",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-tea-for-two",
+   "title": "Tea for Two",
+   "difficulty": "hard",
+   "gridSize": "8x8",
+   "theme": "garden party",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-the-curators-secret",
+   "title": "The Curator's Secret",
+   "difficulty": "hard",
+   "gridSize": "9x9",
+   "theme": "museum",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-canoe-trip",
+   "title": "Canoe Trip",
+   "difficulty": "hard",
+   "gridSize": "8x8",
+   "theme": "campsite",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+   "id": "orig-message-in-a-bottle",
+   "title": "Message in a Bottle",
+   "difficulty": "hard",
+   "gridSize": "9x9",
+   "theme": "harbour",
+   "releaseAt": "2026-01-01T00:00:00.000Z"
+  }
+ ]
+}

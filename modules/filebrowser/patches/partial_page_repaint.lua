@@ -24,28 +24,37 @@ local function apply_partial_page_repaint()
         return type(features) == "table" and features.partial_page_repaint == true
     end
 
+    local function full_refresh_on_page_turn()
+        local features = zen_plugin and zen_plugin.config and zen_plugin.config.features
+        return type(features) ~= "table" or features.full_refresh_on_page_turn ~= false
+    end
+
     local function schedule_repaint(self)
         local perpage = self.perpage
         if not perpage or perpage <= 0 then return end
         local total = #(self.item_table or {})
         local page = self.page or 1
         local items_on_page = math.max(0, math.min(perpage, total - (page - 1) * perpage))
+        local prev_page = self._zen_prev_page
+        self._zen_prev_page = page
         -- Only slots emptied since the last update can hold ghosts; plain refreshes and
         -- reader returns keep the same count and need no full-waveform flash.
         local shown = self._zen_repaint_shown
         self._zen_repaint_shown = items_on_page
-        if not is_enabled() or self.items_max_lines then return end
+        local want_full = full_refresh_on_page_turn() and prev_page ~= nil and prev_page ~= page
+        if not (is_enabled() or want_full) or self.items_max_lines then return end
         -- Skip transient overlay choosers (e.g. MoveChooser) that shouldn't
         -- trigger a forced full repaint when their item count < perpage.
         if self._zen_no_forced_repaint then return end
-        local short_page = shown and items_on_page > 0 and items_on_page < shown
-        if short_page and not pending then
+        local short_page = is_enabled() and shown and items_on_page > 0 and items_on_page < shown
+        if (short_page or want_full) and not pending then
             pending = true
             local widget = self
             local generation = self._zen_cover_hydration_generation
             UIManager:nextTick(function()
                 pending = false
-                if not is_enabled() or widget._zen_no_forced_repaint or (widget.page or 1) ~= page
+                if not (is_enabled() or full_refresh_on_page_turn())
+                        or widget._zen_no_forced_repaint or (widget.page or 1) ~= page
                         or widget._zen_cover_hydration_generation ~= generation then return end
                 UIManager:setDirty(nil, getFullRefreshMode())
                 UIManager:forceRePaint()

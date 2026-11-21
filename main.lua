@@ -234,6 +234,7 @@ function ZenUI:init()
                 _plugin_root .. "/icons/", self.config and self.config.navbar)
         end
         for _i, integration in ipairs({
+            { name = "RedditUI", method = "ensure_reddit_ui_entries" },
             { name = "ZenPM", method = "ensure_zenpm_launcher_entry" },
             { name = "ZenFM", method = "ensure_zenfm_launcher_entry" },
         }) do

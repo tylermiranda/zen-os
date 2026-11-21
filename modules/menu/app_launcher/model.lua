@@ -49,6 +49,8 @@ local function valid_entry(entry, allow_folder)
         return type(entry.quick_setting_id) == "string" and entry.quick_setting_id ~= ""
     elseif entry.type == "folder_shortcut" then
         return type(entry.folder) == "string" and entry.folder ~= ""
+    elseif entry.type == "zen_nav" then
+        return type(entry.nav_id) == "string" and entry.nav_id ~= ""
     elseif entry.type == "tag" then
         return type(entry.tag) == "string" and entry.tag ~= ""
     elseif allow_folder and entry.type == "folder" then
@@ -204,6 +206,57 @@ function M.ensure_zenfm_launcher_entry()
         }
     end
     cfg.zenfm_launcher_added = true
+    Store.save(cfg)
+    return true
+end
+
+function M.ensure_reddit_ui_entries()
+    local cfg = M.ensure()
+    if cfg.reddit_ui_tiles_added == true then
+        return false
+    end
+    local has_library, has_games = false, false
+    for _i, entry in ipairs(cfg.entries or {}) do
+        if type(entry) == "table" then
+            if entry.type == "zen_nav" and entry.nav_id == "books" then
+                has_library = true
+            elseif entry.type == "folder" and entry.label == "Games" then
+                has_games = true
+            end
+        end
+    end
+    local insert_pos = 1
+    if not has_library then
+        table.insert(cfg.entries, insert_pos, {
+            id = M.next_id(cfg),
+            type = "zen_nav",
+            nav_id = "books",
+            label = "Library",
+            subtitle = "Browse all books",
+            icon = "bookshelf",
+            span = 2,
+            card = true,
+        })
+        insert_pos = insert_pos + 1
+    end
+    if not has_games then
+        table.insert(cfg.entries, insert_pos, {
+            id = M.next_id(cfg),
+            type = "folder",
+            label = "Games",
+            subtitle = "Sudoku · Minesweeper · Murdoku",
+            icon = "quick_chess",
+            span = 2,
+            card = true,
+            children = {
+                { id = M.next_id(cfg), type = "plugin", label = "Sudoku", icon = "quick_puzzle", plugin = { key = "sudoku", method = "__menu_callback" } },
+                { id = M.next_id(cfg), type = "plugin", label = "Minesweeper", icon = "quick_puzzle", plugin = { key = "boardgames", method = "onShowMinesweeper" } },
+                { id = M.next_id(cfg), type = "plugin", label = "Murdoku", icon = "quick_crossword", plugin = { key = "murdoku", method = "__menu_callback" } },
+                { id = M.next_id(cfg), type = "plugin", label = "Board Games", icon = "quick_chess", plugin = { key = "boardgames", method = "__menu_callback" } },
+            },
+        })
+    end
+    cfg.reddit_ui_tiles_added = true
     Store.save(cfg)
     return true
 end

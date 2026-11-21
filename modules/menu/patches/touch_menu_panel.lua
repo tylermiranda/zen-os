@@ -259,7 +259,13 @@ function M.install(plugin)
             end
             self.footer:resetLayout()
         end
+        local function menu_open_flash()
+            local features = active_plugin and active_plugin.config and active_plugin.config.features
+            return type(features) ~= "table" or features.menu_open_flash ~= false
+        end
+
         if not self.item_table or not self.item_table.panel then
+            local was_fresh = self.is_fresh
             if self._zen_panel_refs and self._zen_panel_refs.bottom_tabs then
                 self.dimen.y = 0
                 UIManager:setDirty("all", "ui")
@@ -269,7 +275,11 @@ function M.install(plugin)
                 cancelPanelRefresh(self)
             end
             self._zen_panel_refs = nil
-            return orig_updateItems(self, target_page, target_item_id)
+            local res = orig_updateItems(self, target_page, target_item_id)
+            if was_fresh and menu_open_flash() then
+                UIManager:setDirty(self.show_parent or "all", getFullRefreshMode())
+            end
+            return res
         end
 
         local previous_tab = self._zen_panel_refs and self._zen_panel_refs.tab_id
@@ -368,7 +378,7 @@ function M.install(plugin)
             local refresh_type = color_refresh and "partial" or "ui"
             if swap_type then refresh_type, color_refresh = swap_type, true end
             if self.is_fresh or (colored and is_fresh) then
-                refresh_type = colored and getFullRefreshMode() or "flashui"
+                refresh_type = (colored or menu_open_flash()) and getFullRefreshMode() or "flashui"
                 self.is_fresh = false
             end
             return refresh_type, refresh_dimen, color_refresh

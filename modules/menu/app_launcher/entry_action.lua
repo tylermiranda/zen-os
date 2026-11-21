@@ -15,6 +15,8 @@ return function(entry, touch_menu, plugin, scope)
             launch = require("modules/menu/app_launcher/plugin_scan").resolve(entry.plugin.key, entry.plugin.method)
         elseif entry.type == "koreader_menu" and entry.koreader_menu then
             launch = require("modules/menu/app_launcher/native_menu").resolve(entry.koreader_menu.id, scope or "active")
+        elseif entry.type == "zen_nav" and entry.nav_id then
+            launch = function() require("common/nav_button_model").execute({ id = entry.nav_id }, plugin) end
         elseif entry.type == "folder_shortcut" or entry.type == "tag" then
             launch = function() require("common/nav_button_model").execute(entry, plugin) end
         end

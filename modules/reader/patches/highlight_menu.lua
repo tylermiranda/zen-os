@@ -1,26 +1,34 @@
 -- ZenOS: Highlight menu
--- Replaces the default highlight popup with a clean icon row.
--- Patches the text-selection highlight menu with icon buttons.
+-- Instant-save pastel highlight circles on selection + merged edit menu + 1-row category color panel.
 
 local function apply()
     local ReaderHighlight = require("apps/reader/modules/readerhighlight")
+    local Blitbuffer = require("ffi/blitbuffer")
     local ButtonDialog = require("ui/widget/buttondialog")
-    local UIManager = require("ui/uimanager")
+    local CenterContainer = require("ui/widget/container/centercontainer")
+    local ColorCircle = require("common/ui/zen_color_circle")
+    local Device = require("device")
     local Event = require("ui/event")
+    local Font = require("ui/font")
+    local Geom = require("ui/geometry")
     local Handles = require("modules/reader/highlight_handles")
-    local Viewport = require("modules/reader/highlight_viewport")
-    local time = require("ui/time")
-    local ReaderView = require("apps/reader/modules/readerview")
-    local paintTo = ReaderView.paintTo
-    ReaderView.paintTo = function(self, bb, x, y)
-        paintTo(self, bb, x, y)
-        Viewport.paintMargins(self, bb, x, y)
-    end
-    local logger = require("common/zen_logger").new("highlight_menu")
-    local LookupPluginItems = require("modules/reader/lookup_plugin_items")
-    local References = require("modules/reader/references")
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local HorizontalSpan = require("ui/widget/horizontalspan")
+    local InputContainer = require("ui/widget/container/inputcontainer")
     local Labels = require("common/ui/button_labels")
+    local LookupPluginItems = require("modules/reader/lookup_plugin_items")
     local MenuItems = require("modules/reader/highlight_menu_items")
+    local ReaderView = require("apps/reader/modules/readerview")
+    local References = require("modules/reader/references")
+    local TextBoxWidget = require("ui/widget/textboxwidget")
+    local TextWidget = require("ui/widget/textwidget")
+    local UIManager = require("ui/uimanager")
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local Viewport = require("modules/reader/highlight_viewport")
+    local FrameContainer = require("ui/widget/container/framecontainer")
+    local GestureRange = require("ui/gesturerange")
+    local time = require("ui/time")
     local _ = require("gettext")
     local utils = require("common/utils")
     local plugin_root = require("common/plugin_root")
@@ -35,24 +43,25 @@ local function apply()
     }
     local settings_icon = utils.resolveLocalIcon(_stock_icons_dir, "appbar.settings")
     local ai_icon = utils.resolveIcon(_icons_dir, "lookup_ai")
+    local logger = require("common/zen_logger").new("highlight_menu")
+
+    local paintTo = ReaderView.paintTo
+    ReaderView.paintTo = function(self, bb, x, y)
+        paintTo(self, bb, x, y)
+        Viewport.paintMargins(self, bb, x, y)
+    end
 
     local _plugin_ref = rawget(_G, "__ZEN_UI_PLUGIN")
-
-    logger.dbg("apply() called, _plugin_ref=", tostring(_plugin_ref))
-    if _plugin_ref then
-        local cfg = _plugin_ref.config
-        logger.dbg("config=", tostring(cfg))
-        if type(cfg) == "table" and type(cfg.features) == "table" then
-            logger.dbg("features.highlight_lookup=",
-                tostring(cfg.features.highlight_lookup))
-        end
-    end
 
     local function is_enabled()
         local features = _plugin_ref
             and _plugin_ref.config
             and _plugin_ref.config.features
         return type(features) == "table" and features.highlight_lookup == true
+    end
+
+    local function get_lookup_cfg()
+        return (_plugin_ref and _plugin_ref.config and _plugin_ref.config.highlight_lookup) or {}
     end
 
     -- Selection uses default highlight color instead of gray, unless user opted out
@@ -84,22 +93,52 @@ local function apply()
     end
 
     local function show_wikipedia()
-        local cfg = _plugin_ref
-            and _plugin_ref.config
-            and _plugin_ref.config.highlight_lookup
-        return type(cfg) == "table" and cfg.show_wikipedia == true
+        return get_lookup_cfg().show_wikipedia == true
     end
 
     local function show_ai_assistant()
-        local cfg = _plugin_ref
-            and _plugin_ref.config
-            and _plugin_ref.config.highlight_lookup
-        return type(cfg) == "table" and cfg.show_ai_assistant ~= false
+        return get_lookup_cfg().show_ai_assistant ~= false
     end
 
     local function show_labels()
-        local settings = _plugin_ref and _plugin_ref.config.highlight_lookup
-        return settings and settings.show_labels == true
+        return get_lookup_cfg().show_labels == true
+    end
+
+    local function apply_highlight_color(hl, index, color_id)
+        G_reader_settings:saveSetting("highlight_color", color_id)
+        hl.view.highlight.saved_color = color_id
+        if hl.setSelectionColor then hl:setSelectionColor() end
+        local item = index and hl.ui and hl.ui.annotation and hl.ui.annotation.annotations[index]
+        if item and item.color ~= color_id then
+            hl:writePdfAnnotation("delete", item)
+            item.color = color_id
+            if hl.ui.paging then
+                hl:writePdfAnnotation("save", item)
+                if item.note then
+                    hl:writePdfAnnotation("content", item, item.note)
+                end
+            end
+            UIManager:setDirty(hl.dialog, "ui")
+            hl.ui:handleEvent(Event:new("AnnotationsModified", { item }))
+        end
+    end
+
+    local function attach_color_circles(hl, dialog, active_color, index, close_on_pick)
+        if not dialog or type(dialog.addWidget) ~= "function" then return end
+        local avail_w = dialog:getAddedWidgetAvailableWidth()
+        local circle_row = ColorCircle.buildRow(hl, active_color, function(color_id)
+            apply_highlight_color(hl, index, color_id)
+            if close_on_pick then
+                UIManager:close(dialog)
+                if hl.selected_text then
+                    hl:clear()
+                end
+            else
+                UIManager:setDirty(dialog, "ui")
+            end
+        end, { width = avail_w })
+        circle_row.separator = true
+        dialog:addWidget(circle_row)
     end
 
     local function find_highlight_button(self, index, name)
@@ -117,8 +156,6 @@ local function apply()
         return nil
     end
 
-    -- Only the keys we explicitly convert to icons; everything else is "other".
-    -- ai_assistant is the main button registered by assistant.koplugin.
     local KNOWN_KEYS = {
         select = true, highlight = true, search = true, translate = true,
         wikipedia = true, dictionary = true, add_note = true,
@@ -127,14 +164,14 @@ local function apply()
 
     local function get_selection_anchor(self, dialog, index)
         local boxes = index and self:getHighlightVisibleBoxes(index)
-            or (self.selected_text.sboxes or self.selected_text.pboxes)
+            or (self.selected_text and (self.selected_text.sboxes or self.selected_text.pboxes))
         if not boxes or #boxes == 0 then
             return self:_getDialogAnchor(dialog, index)
         end
 
         local page = self.ui.paging and (index
             and self.ui.annotation.annotations[index].pos0.page
-            or self.selected_text.pos0.page)
+            or (self.selected_text and self.selected_text.pos0.page))
         local y0, y1
         for _i, box in ipairs(boxes) do
             if page then box = self.view:pageToScreenTransform(page, box) end
@@ -153,34 +190,176 @@ local function apply()
     end
 
     -- -------------------------------------------------------------------------
-    -- Override: onShowHighlightMenu  (new text-selection popup)
-    -- Build the 3-icon row directly instead of mutating existing button specs.
+    -- Override: showHighlightColorDialog (1-row-per-category list with descriptions)
+    -- -------------------------------------------------------------------------
+    local orig_showHighlightColorDialog = ReaderHighlight.showHighlightColorDialog
+    ReaderHighlight.showHighlightColorDialog = function(self, caller_callback, item)
+        if not is_enabled() then
+            return orig_showHighlightColorDialog(self, caller_callback, item)
+        end
+        local Screen = Device.screen
+        local curr_color = (item and item.color)
+            or G_reader_settings:readSetting("highlight_color")
+            or self.view.highlight.saved_color
+            or "yellow"
+        local order = self.getHighlightColorOrder and self.getHighlightColorOrder()
+            or { "yellow", "blue", "green", "red", "orange" }
+        local seen = {}
+        local ordered = {}
+        for _i, cid in ipairs(order) do
+            ordered[#ordered + 1] = cid
+            seen[cid] = true
+        end
+        if curr_color and not seen[curr_color] then
+            ordered[#ordered + 1] = curr_color
+        end
+
+        local dlg
+        dlg = ButtonDialog:new{
+            title = _("Highlight category"),
+            width_factor = 0.85,
+            buttons = {{
+                {
+                    text = _("Close"),
+                    callback = function() UIManager:close(dlg) end,
+                },
+            }},
+        }
+        local avail_w = dlg:getAddedWidgetAvailableWidth()
+        local pad = Screen:scaleBySize(6)
+        local circle_sz = Screen:scaleBySize(34)
+        local text_w = math.max(100, avail_w - circle_sz - pad * 3)
+        local rows_group = VerticalGroup:new{ align = "left", not_focusable = true }
+
+        for idx, cid in ipairs(ordered) do
+            local label = self.getHighlightColorString and self:getHighlightColorString(cid) or cid
+            local hex = self.getHighlightColorCode and self:getHighlightColorCode(cid) or "#F6DF96"
+            local desc = self.getHighlightColorDescription and self:getHighlightColorDescription(cid) or ""
+            local is_curr = cid == curr_color
+            local swatch = ColorCircle.ColorCircle:new{
+                size = circle_sz,
+                color_id = cid,
+                hex = hex,
+                label = label,
+                description = desc,
+                selected = is_curr,
+                show_caption = false,
+            }
+            local title_w = TextWidget:new{
+                text = label .. (is_curr and "  ✓" or ""),
+                face = Font:getFace("smallinfofont", 18),
+                bold = true,
+                max_width = text_w,
+                padding = 0,
+            }
+            local text_col = VerticalGroup:new{ align = "left", title_w }
+            if desc ~= "" then
+                table.insert(text_col, VerticalSpan:new{ width = Screen:scaleBySize(2) })
+                table.insert(text_col, TextBoxWidget:new{
+                    text = desc,
+                    face = Font:getFace("xx_smallinfofont", 14),
+                    fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+                    width = text_w,
+                })
+            end
+            local row_box = HorizontalGroup:new{
+                align = "center",
+                swatch,
+                HorizontalSpan:new{ width = Screen:scaleBySize(10) },
+                text_col,
+            }
+            local row_frame = FrameContainer:new{
+                bordersize = is_curr and Screen:scaleBySize(2) or Screen:scaleBySize(1),
+                color = is_curr and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_LIGHT_GRAY,
+                radius = Screen:scaleBySize(8),
+                padding = pad,
+                width = avail_w,
+                row_box,
+            }
+            local hit = InputContainer:new{
+                dimen = row_frame:getSize():copy(),
+                row_frame,
+            }
+            hit.ges_events = {
+                TapRow = { GestureRange:new{ ges = "tap", range = hit.dimen } },
+            }
+            hit.paintTo = function(w_self, bb, x, y)
+                w_self.dimen.x = x
+                w_self.dimen.y = y
+                w_self[1]:paintTo(bb, x, y)
+            end
+            hit.onTapRow = function()
+                UIManager:close(dlg)
+                if type(caller_callback) == "function" then
+                    caller_callback(cid)
+                end
+                return true
+            end
+            table.insert(rows_group, hit)
+            if idx < #ordered then
+                table.insert(rows_group, VerticalSpan:new{ width = Screen:scaleBySize(6) })
+            end
+        end
+
+        dlg:addWidget(CenterContainer:new{
+            not_focusable = true,
+            dimen = Geom:new{ w = avail_w, h = rows_group:getSize().h },
+            rows_group,
+        })
+        UIManager:show(dlg)
+    end
+
+    -- -------------------------------------------------------------------------
+    -- Override: onShowHighlightMenu (instant-save + compact circle + icon bar)
     -- -------------------------------------------------------------------------
     local orig_onShowHighlightMenu = ReaderHighlight.onShowHighlightMenu
-
     logger.dbg("orig_onShowHighlightMenu=", tostring(orig_onShowHighlightMenu))
 
-    -- more: show a new selection's other items instead of the icon row.
-    -- Local so More survives plugins that wrap onShowHighlightMenu with a fixed arity (e.g. X-Ray).
     local function show_menu(self, index, more)
-        logger.dbg("onShowHighlightMenu called, is_enabled=",
-            tostring(is_enabled()), "selected_text=", tostring(self.selected_text ~= nil))
         if not is_enabled() then
-            logger.dbg("disabled, falling back to orig")
             return orig_onShowHighlightMenu(self, index)
         end
         if not self.selected_text then
-            logger.dbg("no selected_text, aborting")
             return
+        end
+
+        local cfg = get_lookup_cfg()
+        local instant_save = not index and not more and cfg.instant_save ~= false and self.hold_pos ~= nil
+        local function use_default_color()
+            local c = G_reader_settings:readSetting("highlight_color") or self._fallback_color or "yellow"
+            self.view.highlight.saved_color = c
+            self.view.highlight.saved_drawer = self.view.highlight.saved_drawer or "lighten"
+            if self.setSelectionColor then self:setSelectionColor() end
+            return c
+        end
+
+        local saved_idx = index
+        local active_color = use_default_color()
+        if instant_save then
+            local ok_save, res_idx = pcall(self.saveHighlight, self, not self.selected_text._zen_resized)
+            if ok_save and type(res_idx) == "number" then
+                saved_idx = res_idx
+                local saved_item = self.ui and self.ui.annotation and self.ui.annotation.annotations[saved_idx]
+                if saved_item and saved_item.color then
+                    active_color = saved_item.color
+                end
+            end
         end
 
         local buttons = {{}}
         local labels = show_labels()
-        local function use_default_color()
-            self.view.highlight.saved_color = G_reader_settings:readSetting("highlight_color") or self._fallback_color
-            if self.setSelectionColor then self:setSelectionColor() end -- added after v2026.03
-        end
-        if not index then
+
+        if saved_idx then
+            table.insert(buttons[1], {
+                icon = menu_icons.note,
+                text = labels and _("Note") or nil,
+                callback = function()
+                    local sel_text = self.selected_text and self.selected_text.text
+                    self:onClose()
+                    self:editNote(saved_idx, true, sel_text and nil or nil)
+                end,
+            })
+        else
             buttons[1][1] = {
                 icon = "lookup.highlight",
                 text = labels and _("Highlight") or nil,
@@ -229,12 +408,12 @@ local function apply()
             icon = "lookup.translate",
             text = labels and _("Translate") or nil,
             callback = function()
-                self:translate(index)
+                self:translate(saved_idx)
             end,
         })
 
         if show_ai_assistant() then
-            local ai_btn = find_highlight_button(self, index, "ai_assistant")
+            local ai_btn = find_highlight_button(self, saved_idx, "ai_assistant")
             if ai_btn then
                 table.insert(buttons[1], {
                     icon = ai_icon,
@@ -253,17 +432,13 @@ local function apply()
             end,
         })
 
-        if index then
+        if saved_idx then
             table.insert(buttons[1], {
-                id = "zen_highlight_settings", icon = settings_icon,
-                text = labels and _("Settings") or nil,
+                icon = menu_icons.delete,
+                text = labels and _("Delete") or nil,
                 callback = function()
+                    self:deleteHighlight(saved_idx)
                     self:onClose()
-                    require("modules/settings/zen_settings_page").show(_plugin_ref, {
-                        path = { { key = "text", value = _("Reader") },
-                            { key = "text", value = _("Highlight / Lookup") },
-                            { key = "text", value = _("Highlight") } },
-                    })
                 end,
             })
         end
@@ -278,12 +453,11 @@ local function apply()
                 if not KNOWN_KEYS[key_name]
                         and LookupPluginItems.shouldShow(
                             _plugin_ref and _plugin_ref.config, plugin_setting, "highlight_lookup") then
-                    local ok, btn = pcall(fn_button, self, index)
+                    local ok, btn = pcall(fn_button, self, saved_idx)
                     if ok and btn then
                         if not btn.show_in_highlight_dialog_func
                             or btn.show_in_highlight_dialog_func() then
-                            -- An existing highlight's menu is already its More section.
-                            table.insert((plugin_setting or index) and extra or other, btn)
+                            table.insert((plugin_setting or saved_idx) and extra or other, btn)
                         end
                     end
                 end
@@ -296,13 +470,12 @@ local function apply()
                     text = labels and _("More") or nil,
                     callback = function()
                         local controller = self._zen_highlight_handles
-                        if controller then controller.reopening = true end -- keep the selection across the swap
+                        if controller then controller.reopening = true end
                         UIManager:close(self.highlight_dialog)
-                        show_menu(self, nil, true)
+                        show_menu(self, saved_idx, true)
                     end,
                 })
             end
-            -- Split into rows of 2 so they render properly.
             local max_cols = 2
             for i = 1, #extra, max_cols do
                 local row = {}
@@ -314,7 +487,7 @@ local function apply()
         end
 
         if not more then
-            References.addPinButton(buttons, self.ui, References.selectionPage(self, index), function() self:onClose() end)
+            References.addPinButton(buttons, self.ui, References.selectionPage(self, saved_idx), function() self:onClose() end)
         end
         LookupPluginItems.protectButtons(buttons)
         if labels then buttons = Labels.prepare(buttons) end
@@ -322,19 +495,21 @@ local function apply()
         self.highlight_dialog = ButtonDialog:new{
             buttons = buttons,
             anchor = function()
-                return get_selection_anchor(self, self.highlight_dialog, index)
+                return get_selection_anchor(self, self.highlight_dialog, saved_idx)
             end,
             tap_close_callback = function()
-                if self.hold_pos then
+                if self.hold_pos or self.selected_text then
                     self:clear()
                 end
             end,
         }
+        if not more and saved_idx then
+            attach_color_circles(self, self.highlight_dialog, active_color, saved_idx, true)
+        end
         if labels then Labels.apply(self.highlight_dialog.buttontable, buttons) end
-        Handles.attach(self, self.highlight_dialog, index, function()
-            self:onShowHighlightMenu(index)
+        Handles.attach(self, self.highlight_dialog, saved_idx, function()
+            self:onShowHighlightMenu(saved_idx)
         end)
-        logger.dbg("showing custom highlight_dialog")
         UIManager:show(self.highlight_dialog, "[ui]")
     end
     ReaderHighlight.onShowHighlightMenu = function(self, index) return show_menu(self, index) end
@@ -343,10 +518,9 @@ local function apply()
     ReaderHighlight.showHighlightDialog = function(self, index)
         if not is_enabled() then return orig_showHighlightDialog(self, index) end
         local original_new = ButtonDialog.new
-        -- Intercept only this synchronous factory call to preserve upstream actions and bindings.
         ButtonDialog.new = function(class, spec, ...)
             if spec.name ~= "edit_highlight_dialog" then return original_new(class, spec, ...) end
-            local settings = _plugin_ref.config.highlight_lookup or {}
+            local settings = get_lookup_cfg()
             local available = Handles.available(self, index)
             local original_buttons = spec.buttons
             spec.buttons = MenuItems.arrange(spec.buttons, settings, available, menu_icons)
@@ -358,6 +532,8 @@ local function apply()
             local dialog = original_new(class, spec, ...)
             if settings.show_labels then Labels.apply(dialog.buttontable, spec.buttons) end
             if empty then dialog.buttons = {} end
+            local item = self.ui and self.ui.annotation and self.ui.annotation.annotations[index]
+            attach_color_circles(self, dialog, item and item.color, index, true)
             local controller = Handles.attach(self, dialog, index, function()
                 self:showHighlightDialog(index)
             end)
@@ -368,6 +544,7 @@ local function apply()
                 MenuItems.compact(dialog.buttons)
                 dialog:reinit()
                 if settings.show_labels then Labels.apply(dialog.buttontable, dialog.buttons) end
+                attach_color_circles(self, dialog, item and item.color, index, true)
             end
             self.highlight_dialog = dialog
             return dialog
@@ -433,10 +610,6 @@ local function apply()
             if original then return original(self, ...) end
         end
     end
-
-    logger.dbg("onShowHighlightMenu override installed, new fn=",
-        tostring(ReaderHighlight.onShowHighlightMenu))
-
 end
 
 return apply

@@ -52,6 +52,9 @@ function M.build(ctx)
                     callback = function(spin) config.page_browser.bookmarks_font_size = spin.value; save() end,
                 })
             end },
+            { text = _("Import Kobo highlights & notes"), keep_menu_open = true, separator = true, callback = function()
+                require("common/kobo_import").importAll()
+            end },
         },
     }
 end

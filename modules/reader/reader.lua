@@ -15,6 +15,7 @@ local PATCH_MODULES = {
     reader_flash_cbz = "modules/reader/patches/reader_flash_cbz",
     margin_hold_guard = "modules/reader/patches/margin_hold_guard",
     bookmarks = "modules/reader/patches/bookmarks",
+    dogear_bookmark = "modules/reader/patches/dogear_bookmark",
     page_browser = "modules/reader/patches/page_browser",
     reader_references = "modules/reader/patches/reader_references",
     stable_page_statistics = "modules/reader/patches/stable_page_statistics",
@@ -76,6 +77,7 @@ local READER_FEATURES = {
     "reader_flash_cbz",
     "margin_hold_guard", -- swallow holds inside page margins
     "bookmarks", -- larger black page numbers in the bookmark/highlight list
+    "dogear_bookmark", -- bigger green folded-corner bookmark indicator
     "highlight_names",
     "night_highlights",
     "highlight_menu", -- self-disables when feature is off

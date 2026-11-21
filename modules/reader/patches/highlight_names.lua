@@ -1,17 +1,64 @@
-local function configured_name(ReaderHighlight, color_name)
+local DEFAULT_COLOR_ORDER = { "yellow", "blue", "green", "red", "orange" }
+
+local DEFAULT_COLOR_NAMES = {
+    yellow = "Quotes",
+    blue   = "Core Ideas",
+    green  = "Context",
+    red    = "Reactions",
+    orange = "Action",
+}
+
+local DEFAULT_COLOR_CODES = {
+    yellow = "#F6DF96",
+    blue   = "#B8D8F8",
+    green  = "#BCE5C8",
+    red    = "#DFC5F2",
+    orange = "#FAD0B4",
+}
+
+local DEFAULT_COLOR_DESCRIPTIONS = {
+    yellow = "Great writing, memorable lines, or favourite passages.",
+    blue   = "Key story turning points in fiction, or main arguments in non-fiction.",
+    green  = "Lore, character backgrounds, historical dates, or definitions.",
+    red    = "Scenes that surprised you, made you laugh, or hit hard emotionally.",
+    orange = "Questions to research, unfamiliar words, or practical advice to apply.",
+}
+
+local function get_lookup(ReaderHighlight)
     local plugin = rawget(ReaderHighlight, "_zen_ui_highlight_names_plugin")
     local lookup = plugin and plugin.config and plugin.config.highlight_lookup
-    local names = type(lookup) == "table" and lookup.color_names
+    return type(lookup) == "table" and lookup or nil
+end
+
+local function configured_name(ReaderHighlight, color_name)
+    local lookup = get_lookup(ReaderHighlight)
+    local names = lookup and lookup.color_names
     local name = type(names) == "table" and names[color_name]
     if type(name) == "string" and name:match("%S") then return name end
+    return DEFAULT_COLOR_NAMES[color_name]
 end
 
 local function configured_color(ReaderHighlight, color_name)
-    local plugin = rawget(ReaderHighlight, "_zen_ui_highlight_names_plugin")
-    local lookup = plugin and plugin.config and plugin.config.highlight_lookup
-    local colors = type(lookup) == "table" and lookup.color_codes
+    local lookup = get_lookup(ReaderHighlight)
+    local colors = lookup and lookup.color_codes
     local color = type(colors) == "table" and colors[color_name]
     if type(color) == "string" and color:match("^#%x%x%x%x%x%x$") then return color end
+    return DEFAULT_COLOR_CODES[color_name]
+end
+
+local function configured_description(ReaderHighlight, color_name)
+    local lookup = get_lookup(ReaderHighlight)
+    local descs = lookup and lookup.color_descriptions
+    local desc = type(descs) == "table" and descs[color_name]
+    if type(desc) == "string" and desc:match("%S") then return desc end
+    return DEFAULT_COLOR_DESCRIPTIONS[color_name]
+end
+
+local function configured_order(ReaderHighlight)
+    local lookup = get_lookup(ReaderHighlight)
+    local order = lookup and lookup.color_order
+    if type(order) == "table" and #order > 0 then return order end
+    return DEFAULT_COLOR_ORDER
 end
 
 local function invert_color(color)
@@ -56,6 +103,14 @@ local function apply(plugin)
 
     if ReaderHighlight._zen_ui_highlight_names_patched then return end
     ReaderHighlight._zen_ui_highlight_names_patched = true
+
+    function ReaderHighlight:getHighlightColorDescription(color_name)
+        return configured_description(ReaderHighlight, color_name)
+    end
+
+    function ReaderHighlight.getHighlightColorOrder()
+        return configured_order(ReaderHighlight)
+    end
 
     local orig_get_string = ReaderHighlight.getHighlightColorString
     if type(orig_get_string) == "function" then

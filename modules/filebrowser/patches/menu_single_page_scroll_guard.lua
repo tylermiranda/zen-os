@@ -20,13 +20,27 @@ local function apply_menu_single_page_scroll_guard()
     local orig_next = Menu.onNextPage
     local orig_prev = Menu.onPrevPage
 
+    local zen_plugin = rawget(_G, "__ZEN_UI_PLUGIN")
+    local function loop_pages_enabled()
+        local features = zen_plugin and zen_plugin.config and zen_plugin.config.features
+        return type(features) ~= "table" or features.loop_pages ~= false
+    end
+
     Menu.onNextPage = function(self)
-        if (self.page_num or 1) <= 1 then return true end
+        local total = self.page_num or 1
+        if total <= 1 then return true end
+        if loop_pages_enabled() and (self.page or 1) >= total and type(self.onGotoPage) == "function" then
+            return self:onGotoPage(1)
+        end
         return orig_next(self)
     end
 
     Menu.onPrevPage = function(self)
-        if (self.page_num or 1) <= 1 then return true end
+        local total = self.page_num or 1
+        if total <= 1 then return true end
+        if loop_pages_enabled() and (self.page or 1) <= 1 and type(self.onGotoPage) == "function" then
+            return self:onGotoPage(total)
+        end
         return orig_prev(self)
     end
 

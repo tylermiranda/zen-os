@@ -7,7 +7,7 @@ local function apply_zen_mode()
 
     local function is_enabled()
         local features = zen_plugin and zen_plugin.config and zen_plugin.config.features
-        return type(features) == "table" and features.zen_mode == true
+        return type(features) == "table" and (features.zen_mode == true or features.clean_reader_top_menu == true)
     end
 
     -- Zen mode keeps only Zen's own tabs; KOReader and plugin tabs (e.g. Ink Away) are hidden.

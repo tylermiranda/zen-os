@@ -230,6 +230,7 @@
         local all_rows = {}
         do
             local current_row
+            local current_span = 0
             local force_break = false
             local break_title
             for _i, entry in ipairs(visible) do
@@ -238,24 +239,29 @@
                     break_title = type(entry.label) == "string" and entry.label:match("%S")
                         and entry.label or nil
                 else
-                    if not current_row or #current_row >= cols or force_break then
+                    local span = math.min(cols, math.max(1, math.floor(tonumber(entry.span) or 1)))
+                    if not current_row or current_span + span > cols or force_break then
                         current_row = {}
                         current_row._break_title = break_title
+                        current_row._total_span = 0
                         all_rows[#all_rows + 1] = current_row
+                        current_span = 0
                     end
                     current_row[#current_row + 1] = entry
+                    current_span = current_span + span
+                    current_row._total_span = current_span
                     force_break = false
                     break_title = nil
                 end
             end
         end
 
-        -- Size every cell off the longest row (across all pages) so a short or
-        -- forced-break row doesn't stretch its icons wider than a full row, and
-        -- every row shares one pitch.
+        -- Size every cell off the widest row span (across all pages) so a short or
+        -- forced-break row keeps the exact same pitch.
         local max_row_len = 0
         for _i, row in ipairs(all_rows) do
-            if #row > max_row_len then max_row_len = #row end
+            local s = row._total_span or #row
+            if s > max_row_len then max_row_len = s end
         end
         local uniform_cell_w = ButtonLabelWidth.equalCellWidth(inner_w, max_row_len)
 
@@ -313,6 +319,10 @@
                 if nb == page then return false end
                 touch_menu._app_launcher_page = nb
                 touch_menu:updateItems(1)
+                local features = zen_plugin and zen_plugin.config and zen_plugin.config.features
+                if type(features) ~= "table" or features.full_refresh_on_page_turn ~= false then
+                    UIManager:setDirty("all", require("common/ui/refresh")())
+                end
                 return true
             end
             touch_menu._zen_panel_refs = refs
@@ -389,21 +399,25 @@
             VerticalSpan:new{ width = pad },
         }
 
+        local row_spans = {}
         for _i, row_entries in ipairs(page_rows) do
             rows[#rows + 1] = HorizontalGroup:new{ align = "top" }
             row_counts[#rows] = 0
+            row_spans[#rows] = 0
             row_widths[#rows] = uniform_cell_w
             row_titles[#rows] = row_entries._break_title
             layout_rows[#layout_rows + 1] = {}
             for _j, entry in ipairs(row_entries) do
                 row_counts[#rows] = row_counts[#rows] + 1
+                local span = math.min(cols, math.max(1, math.floor(tonumber(entry.span) or 1)))
+                row_spans[#rows] = row_spans[#rows] + span
                 local dim = not entry._app_back
                     and (not entry_available(entry, touch_menu) or entry_disabled(entry))
                 local quick_setting_id = entry.quick_setting_id
                 local controls = entry.type == "quick_setting"
                     and rawget(_G, "__ZEN_UI_QUICK_SETTINGS") or nil
                 local cell = make_cell{
-                    cell_w = row_widths[#rows] or uniform_cell_w,
+                    cell_w = uniform_cell_w * span,
                     cell_h = cell_h,
                     pad = pad,
                     icon_size = icon_size,
@@ -412,6 +426,9 @@
                     label_face = label_face,
                     label_side_padding = label_side_padding,
                     label = Model.display_label(entry),
+                    subtitle = entry.subtitle,
+                    span = span,
+                    card = entry.card,
                     show_label = show_labels,
                     icon = entry.icon or (entry.type == "folder" and DEFAULT_FOLDER_ICON or DEFAULT_ENTRY_ICON),
                     dim = dim,
@@ -452,7 +469,7 @@
                 }
                 panel[#panel + 1] = VerticalSpan:new{ width = title_gap }
             end
-            local used = (row_counts[_i] or 0) * (row_widths[_i] or uniform_cell_w)
+            local used = (row_spans[_i] or row_counts[_i] or 0) * (row_widths[_i] or uniform_cell_w)
             -- Centre within the inset box rather than the full panel, so a full
             -- row begins and ends exactly hpad from the edges and shorter rows
             -- stay on the same left margin.
